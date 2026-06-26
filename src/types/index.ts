@@ -12,3 +12,9 @@ export type {
   WhatsappConfig,
   SessionFinalizationConfig,
 } from "./config";
+export type { SendResult, StreamCallback, ActivityCallback, SendCallbacks, WatchBehavior, EngineOptions, ChatEngine, JobResult } from "./engine";
+export type { Channel, ChannelFactory, Outbound, OutboundMedia, Recipient } from "./channel";
+export type { ChatState } from "./chat-state";
+export type { SaveMessageParams, RoomStats, RecentMessage, SearchResult, SessionMessage } from "./message";
+export type { JobInput, JobPromptSource, ResolvedJobPrompt } from "./job";
+export type { EmployeeInfo } from "./employee";
