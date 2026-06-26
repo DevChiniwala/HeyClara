@@ -25,7 +25,7 @@ const slackSchema = z.object({
   workspace: z.string().nullable().default(null),
   workspace_id: z.string().nullable().default(null),
   workspace_url: z.string().nullable().default(null),
-  watch: z.record(slackWatchChannelSchema).nullable().default(null),
+  watch: z.record(z.string(), slackWatchChannelSchema).nullable().default(null),
 });
 
 const twilioSchema = z.object({

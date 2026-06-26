@@ -20,7 +20,7 @@ export function createTelegramChannel(): Channel | null {
       bot = new Bot(tg.bot_token!);
       stopPolling = false;
 
-      bot.on("message:text", async (ctx: Record<string, unknown>) => {
+      bot.on("message:text", async (ctx: any) => {
         const msg = ctx.message as Record<string, unknown> | undefined;
         const chat = ctx.chat as Record<string, unknown> | undefined;
         const text = (msg?.text as string) || "";
