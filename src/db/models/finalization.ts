@@ -2,10 +2,15 @@ import { getSql } from "../connection";
 
 export async function enqueue(sessionId: string, room: string): Promise<void> {
   const sql = getSql();
+  const existing = await sql`
+    SELECT id FROM finalization_requests
+    WHERE session_id = ${sessionId} AND status = 'pending'
+    LIMIT 1
+  `;
+  if (existing.length > 0) return;
   await sql`
     INSERT INTO finalization_requests (session_id, room)
     VALUES (${sessionId}, ${room})
-    ON CONFLICT DO NOTHING
   `;
 }
 
