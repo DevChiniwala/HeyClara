@@ -1,0 +1,9 @@
+node_modules/
+dist/
+tmp/
+*.log
+.env
+bun.lockb
+.claude/
+.ruff_cache/
+.playwright-mcp/
