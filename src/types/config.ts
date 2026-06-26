@@ -44,6 +44,8 @@ const phoneSchema = z.object({
   openai_api_key: z.string().nullable().default(null),
   realtime_model: z.string().default("gpt-realtime"),
   voice: z.string().default("marin"),
+  stt_language: z.string().default("en-US"),
+  speech_timeout: z.string().default("auto"),
 });
 
 const smsSchema = z.object({

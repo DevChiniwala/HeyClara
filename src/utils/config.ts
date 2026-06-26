@@ -52,6 +52,8 @@ const DEFAULTS: ClaraConfig = {
       openai_api_key: null,
       realtime_model: "gpt-realtime",
       voice: "marin",
+      stt_language: "en-US",
+      speech_timeout: "auto",
     },
     sms: {
       enabled: true,

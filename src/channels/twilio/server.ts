@@ -39,8 +39,14 @@ async function start(): Promise<void> {
 
       const params = new URLSearchParams(text);
       const body: Record<string, unknown> = {};
+
       for (const [key, value] of params) {
         body[key] = value;
+      }
+
+      // Merge query params (for GET requests like outbound call TwiML fetch)
+      for (const [key, value] of url.searchParams) {
+        if (!(key in body)) body[key] = value;
       }
 
       for (const handler of handlers) {

@@ -6,6 +6,7 @@ import { createTelegramChannel } from "./telegram";
 import { createSlackChannel } from "./slack";
 import { createSmsChannel } from "./sms";
 import { createWhatsAppChannel } from "./whatsapp";
+import { createVoiceChannel } from "./voice";
 import { getTwilioServer } from "./twilio/server";
 
 export { getChannel, getStarted } from "./registry";
@@ -15,6 +16,7 @@ export function registerAllChannels(): void {
   registerChannel(() => createSlackChannel());
   registerChannel(() => createSmsChannel());
   registerChannel(() => createWhatsAppChannel());
+  registerChannel(() => createVoiceChannel());
 }
 
 export interface StartResult {
@@ -62,6 +64,8 @@ export function getConfiguredChannelNames(): string[] {
   const smsFrom = channels.sms.from_number ?? channels.phone.from_number;
   if (channels.sms.enabled && channels.twilio.sid && channels.twilio.secret && smsFrom) names.push("sms");
   if (channels.whatsapp.enabled && channels.twilio.sid && channels.twilio.secret && channels.whatsapp.from_number) names.push("whatsapp");
+  const phoneFrom = channels.phone.from_number;
+  if (channels.phone.enabled && channels.twilio.sid && channels.twilio.secret && phoneFrom) names.push("voice");
   return names;
 }
 
