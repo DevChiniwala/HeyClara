@@ -3,7 +3,7 @@ import type { AgentBackend, AgentSession, AgentSessionContext, AgentEvent } from
 import type { Attachment } from "../../types/attachment";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-const AgentProcess: any = (await import("@anthropic-ai/claude-agent-sdk")).AgentProcess;
+const AgentProcess: any = (await import("@anthropic-ai/claude-agent-sdk" as any)).AgentProcess;
 
 const CLAUDE_BIN = process.env.CLAUDE_BIN || "claude";
 

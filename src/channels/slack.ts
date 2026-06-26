@@ -22,7 +22,7 @@ export function createSlackChannel(): Channel | null {
         appToken: sl.app_token!,
       });
 
-      app.message(async (args: Record<string, unknown>) => {
+      app.message(async (args: any) => {
         const message = args.message as Record<string, unknown>;
         const say = args.say as (opts: Record<string, unknown>) => Promise<unknown>;
         const msgType = message.subtype as string | undefined;
