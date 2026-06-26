@@ -289,7 +289,8 @@ program.command("test")
   });
 
 program.command("init").description("Run setup wizard").action(async () => {
-  console.log("Init wizard \u2014 coming in Phase 3");
+  const { setupWizard } = await import("./init");
+  await setupWizard();
 });
 
 program.parse(process.argv);
