@@ -200,7 +200,13 @@ function stripMarkdown(text: string): string {
 function chunkText(text: string): string[] {
   if (text.length <= MAX_RESPONSE_LENGTH) return [text];
   const chunks: string[] = [];
-  const sentences = text.match(/[^.!?\n]+[.!?\n]?/g) || [text];
+  const sentences = text.match(/[^.!?\n]+[.!?\n]?/g) || (text.length > 0 ? [text] : []);
+  if (sentences.length <= 1) {
+    for (let i = 0; i < text.length; i += MAX_RESPONSE_LENGTH) {
+      chunks.push(text.slice(i, i + MAX_RESPONSE_LENGTH));
+    }
+    return chunks;
+  }
   let current = "";
   for (const sentence of sentences) {
     if ((current + sentence).length > MAX_RESPONSE_LENGTH && current.length > 0) {
