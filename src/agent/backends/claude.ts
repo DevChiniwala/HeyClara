@@ -1,7 +1,9 @@
-import { AgentProcess } from "@anthropic-ai/claude-agent-sdk";
 import { normalizeSdkEvent } from "../normalizers/sdk";
 import type { AgentBackend, AgentSession, AgentSessionContext, AgentEvent } from "../types";
 import type { Attachment } from "../../types/attachment";
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const AgentProcess: any = (await import("@anthropic-ai/claude-agent-sdk")).AgentProcess;
 
 const CLAUDE_BIN = process.env.CLAUDE_BIN || "claude";
 
@@ -27,6 +29,14 @@ export class ClaudeBackend implements AgentBackend {
 
     args.push("--", ctx.systemPrompt);
 
+    const SDK = await import("@anthropic-ai/claude-agent-sdk");
+    const AgentProcess = (SDK as Record<string, unknown>).AgentProcess as new (opts: Record<string, unknown>) => {
+      enablePrompt(): void;
+      disablePrompt(): void;
+      sendPrompt(text: string): AsyncIterable<unknown>;
+      abort(): void;
+      close(): Promise<void>;
+    };
     const proc = new AgentProcess({
       agentProcess: CLAUDE_BIN,
       args,

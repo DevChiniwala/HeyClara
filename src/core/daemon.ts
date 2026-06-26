@@ -185,7 +185,7 @@ export async function runDaemon(): Promise<void> {
   }
   if (recovered > 0) { writeState(state); log.info({ recovered }, "recovered stale running jobs"); }
 
-  setMcpFactory((ctx) => ({ clara: createClaraMcpServer(ctx) }));
+  setMcpFactory((ctx) => ({ clara: createClaraMcpServer(ctx as Record<string, unknown> | undefined) }));
   log.info("MCP server factory initialized");
 
   await startMcpEndpoint(CLARA_TOOLS);

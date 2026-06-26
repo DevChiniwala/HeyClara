@@ -102,7 +102,7 @@ export async function runTests(verbose: boolean, extraArgs: string[]): Promise<v
     for (const line of output.split("\n")) {
       if (/^\s*\d+ pass/.test(line) || /^\s*\d+ fail/.test(line) || /^Ran \d+ tests/.test(line) || /expect\(\) calls/.test(line)) {
         console.log(line);
-      } else if (/^?|FAIL|error:/i.test(line.trim())) {
+      } else if (/FAIL|error:/i.test(line.trim())) {
         console.log(line);
       }
     }

@@ -10,7 +10,7 @@ let server: ReturnType<typeof Bun.serve> | null = null;
 const PORT = 0; // random available port
 
 export async function startMcpEndpoint(tools: NiaTool[]): Promise<number> {
-  if (server) return server.port;
+  if (server) return server.port ?? 0;
 
   server = Bun.serve({
     port: PORT,
@@ -38,7 +38,7 @@ export async function startMcpEndpoint(tools: NiaTool[]): Promise<number> {
   });
 
   log.info({ port: server.port }, "MCP endpoint started");
-  return server.port;
+  return server.port ?? 0;
 }
 
 export function stopMcpEndpoint(): void {

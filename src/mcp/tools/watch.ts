@@ -1,15 +1,15 @@
 import { getConfig, updateRawConfig } from "../../utils/config";
-import type { SlackWatchChannel } from "../../types/config";
 
-function readWatchConfig(): Record<string, SlackWatchChannel> {
-  return getConfig().channels.slack.watch || {};
+function readWatchConfig(): Record<string, Record<string, unknown>> {
+  const w = getConfig().channels.slack.watch;
+  return (w || {}) as Record<string, Record<string, unknown>>;
 }
 
 export async function addWatchChannel(name: string, behavior?: string): Promise<string> {
   const current = readWatchConfig();
   if (current[name]) return `Watch channel "${name}" already exists. Use update to change.`;
 
-  const entry: SlackWatchChannel = { enabled: true };
+  const entry: Record<string, unknown> = { enabled: true };
   if (behavior !== undefined) entry.behavior = behavior;
 
   updateRawConfig({
