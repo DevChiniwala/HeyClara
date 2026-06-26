@@ -32,6 +32,7 @@ async function tick(): Promise<void> {
   }
 
   const config = getConfig();
+  const promises: Promise<void>[] = [];
 
   for (const job of dueJobs) {
     if (!job.always && !isWithinActiveHours()) {
@@ -79,8 +80,10 @@ async function tick(): Promise<void> {
       log.info({ job: job.name }, "scheduler: one-shot job completed, auto-disabled");
     }
 
-    await runPromise;
+    promises.push(runPromise);
   }
+
+  await Promise.all(promises);
 }
 
 export function startScheduler(): void {
