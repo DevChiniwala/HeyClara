@@ -1,13 +1,13 @@
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
-import { writeFileSync, unlinkSync, existsSync } from "fs";
+import { existsSync, mkdirSync, unlinkSync } from "fs";
+import { dirname } from "path";
 import { getPaths } from "./paths";
-
-// Note: pid tests interact with the actual ~/.clara/ pid file
 
 describe("pid file operations", () => {
   const pidFile = getPaths().pidFile;
 
   beforeEach(() => {
+    mkdirSync(dirname(pidFile), { recursive: true });
     if (existsSync(pidFile)) unlinkSync(pidFile);
   });
 

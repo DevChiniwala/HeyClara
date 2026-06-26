@@ -66,7 +66,7 @@ describe("chunkText", () => {
   });
 
   it("splits long text at sentence boundaries", () => {
-    const longText = "A. ".repeat(100);
+    const longText = "Longer sentence fragment. ".repeat(200);
     const chunks = chunkText(longText);
     expect(chunks.length).toBeGreaterThan(1);
     for (const chunk of chunks) {
@@ -78,5 +78,7 @@ describe("chunkText", () => {
     const text = "x".repeat(2000);
     const chunks = chunkText(text);
     expect(chunks.length).toBeGreaterThan(1);
+    const total = chunks.reduce((s, c) => s + c.length, 0);
+    expect(total).toBe(2000);
   });
 });
