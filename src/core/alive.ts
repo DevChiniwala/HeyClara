@@ -89,10 +89,14 @@ async function heartbeat(): Promise<void> {
   lastFailures = failureNames;
 }
 
+function jitter(ms: number): number {
+  return ms + Math.round(Math.random() * ms * 0.1 - ms * 0.05);
+}
+
 export function startAlive(): void {
   log.info("alive started (60s heartbeat)");
-  setTimeout(heartbeat, 10_000);
-  timer = setInterval(heartbeat, HEARTBEAT_INTERVAL);
+  setTimeout(heartbeat, jitter(10_000));
+  timer = setInterval(heartbeat, jitter(HEARTBEAT_INTERVAL));
 }
 
 export function stopAlive(): void {
