@@ -1,4 +1,4 @@
-import { App, type SlackEventMiddlewareArgs } from "@slack/bolt";
+import { App } from "@slack/bolt";
 import { getConfig } from "../utils/config";
 import { log } from "../utils/log";
 import type { Channel, OutboundMedia, Recipient } from "../types/channel";
@@ -22,15 +22,18 @@ export function createSlackChannel(): Channel | null {
         appToken: sl.app_token!,
       });
 
-      app.message(async ({ message, say, client, context }: SlackEventMiddlewareArgs<"message">) => {
-        if (message.subtype && message.subtype !== "bot_message") return;
+      app.message(async (args: Record<string, unknown>) => {
+        const message = args.message as Record<string, unknown>;
+        const say = args.say as (opts: Record<string, unknown>) => Promise<unknown>;
+        const msgType = message.subtype as string | undefined;
+        if (msgType && msgType !== "bot_message") return;
         if (message.bot_id) return;
 
-        const text = "text" in message ? message.text : "";
+        const text = (message.text as string) || "";
         if (!text) return;
 
         const channelId = message.channel as string;
-        const threadTs = message.thread_ts || message.ts;
+        const threadTs = (message.thread_ts as string) || (message.ts as string);
         const userId = message.user as string;
         const room = `slack-${channelId}`;
 

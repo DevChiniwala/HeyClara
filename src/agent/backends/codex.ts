@@ -42,7 +42,7 @@ export class CodexBackend implements AgentBackend {
           env: { ...process.env, CLAUDE_CODE_ENTRYPOINT: undefined },
         });
 
-        const reader = createInterface({ input: proc.stdout, crlfDelay: Infinity });
+        const reader = createInterface({ input: proc.stdout as NodeJS.ReadableStream, crlfDelay: Infinity });
         let sawResult = false;
 
         try {
@@ -73,7 +73,7 @@ export class CodexBackend implements AgentBackend {
         const { exitCode, stderr } = await new Promise<{ exitCode: number | null; stderr: string }>((resolve) => {
           if (!proc) return resolve({ exitCode: null, stderr: "" });
           let stderrData = "";
-          proc.stderr.on("data", (chunk: Buffer) => { stderrData += chunk.toString(); });
+          proc.stderr?.on("data", (chunk: Buffer) => { stderrData += chunk.toString(); });
           proc.on("close", (code) => resolve({ exitCode: code, stderr: stderrData }));
         });
 

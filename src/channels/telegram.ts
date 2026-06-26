@@ -1,4 +1,4 @@
-import { Bot, type Context } from "grammy";
+import { Bot } from "grammy";
 import { getConfig } from "../utils/config";
 import { log } from "../utils/log";
 import type { Channel, OutboundMedia, Recipient } from "../types/channel";
@@ -20,9 +20,11 @@ export function createTelegramChannel(): Channel | null {
       bot = new Bot(tg.bot_token!);
       stopPolling = false;
 
-      bot.on("message:text", async (ctx: Context) => {
-        const text = ctx.message.text;
-        const chatId = ctx.chat.id;
+      bot.on("message:text", async (ctx: Record<string, unknown>) => {
+        const msg = ctx.message as Record<string, unknown> | undefined;
+        const chat = ctx.chat as Record<string, unknown> | undefined;
+        const text = (msg?.text as string) || "";
+        const chatId = (chat?.id as number) || 0;
         const room = `telegram-${chatId}`;
 
         const engine = await createChatEngine({

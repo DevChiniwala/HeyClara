@@ -23,8 +23,8 @@ export function normalizeSdkEvent(msg: unknown): AgentEvent[] {
           type: "result",
           text: String(raw.text || ""),
           usage: {
-            costUsd: Number(raw.cost_usd || raw.usage?.costUsd || 0),
-            turns: Number(raw.turns || raw.usage?.turns || 0),
+            costUsd: Number(raw.cost_usd || (raw.usage as Record<string, unknown>)?.costUsd || 0),
+            turns: Number(raw.turns || (raw.usage as Record<string, unknown>)?.turns || 0),
           },
           backendSessionId: String(raw.backendSessionId || raw.sessionId || ""),
           terminalReason: raw.terminalReason ? String(raw.terminalReason) : undefined,

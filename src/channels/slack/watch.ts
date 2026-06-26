@@ -18,12 +18,13 @@ export async function handleWatchMessage(msg: WatchMessage): Promise<void> {
   if (!watches) return;
 
   for (const [key, watchConfig] of Object.entries(watches)) {
-    if (!watchConfig.enabled) continue;
+    const wc = watchConfig as { enabled?: boolean; behavior?: string };
+    if (!wc.enabled) continue;
 
     const { channelId } = parseWatchKey(key);
     if (channelId !== msg.channelId) continue;
 
-    const behavior = getWatchBehavior(msg.channelName, watchConfig.behavior);
+    const behavior = getWatchBehavior(msg.channelName, wc.behavior);
     if (!behavior) continue;
 
     log.info({ channel: msg.channelName, user: msg.userId }, "watch channel message");
