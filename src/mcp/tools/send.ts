@@ -58,5 +58,12 @@ export async function sendMessage(
 }
 
 export async function placeCall(args: Record<string, unknown>): Promise<string> {
-  return `Phone calls are not yet implemented. Configure Twilio phone to enable.`;
+  const number = args.number as string;
+  const text = (args.text as string) || "";
+  if (!number) return "Error: missing required parameter 'number'.";
+
+  const { placeOutboundCall } = await import("../../channels/voice");
+  const ok = await placeOutboundCall(number, text || undefined);
+  if (ok) return `Call placed to ${number}.`;
+  return "Failed to place call. Check Twilio configuration.";
 }
