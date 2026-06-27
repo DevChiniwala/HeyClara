@@ -1,4 +1,5 @@
 import Link from "next/link";
+import DaemonStatus from "@/components/layout/DaemonStatus";
 
 export default function LandingPage() {
   return (
@@ -25,10 +26,7 @@ export default function LandingPage() {
             Launch Dashboard
           </Link>
         </div>
-        <div className="flex items-center gap-2 justify-center text-on-surface-variant mt-8">
-          <span className="w-2 h-2 rounded-full bg-primary animate-pulse shadow-[0_0_8px_#f97316]" />
-          <span className="text-label-caps font-label-caps uppercase tracking-wider">Daemon Status: Checking...</span>
-        </div>
+        <DaemonStatus />
       </div>
     </div>
   );
