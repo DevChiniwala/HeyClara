@@ -72,9 +72,7 @@ function waitForExit(timeoutMs: number): void {
     if (findDaemonPids().length === 0) return;
     Bun.sleepSync(100);
   }
-  for (const pid of findDaemonPids()) {
-    try { process.kill(pid, "SIGKILL"); } catch {}
-  }
+  for (const pid of findDaemonPids()) killDaemon(pid);
   const killDeadline = Date.now() + 2_000;
   while (Date.now() < killDeadline) {
     if (findDaemonPids().length === 0) return;
@@ -83,20 +81,26 @@ function waitForExit(timeoutMs: number): void {
 }
 
 export function findDaemonPids(): number[] {
+  const pid = readPid();
+  if (pid === null || pid === process.pid) return [];
   try {
-    const result = Bun.spawnSync(["pgrep", "-f", "src/cli/index\\.ts run$"]);
-    const stdout = new TextDecoder().decode(result.stdout).trim();
-    if (!stdout) return [];
-    return stdout.split("\n").map((l) => parseInt(l, 10)).filter((pid) => !isNaN(pid) && pid !== process.pid);
-  } catch { return []; }
+    process.kill(pid, 0);
+    return [pid];
+  } catch {
+    return [];
+  }
+}
+
+function killDaemon(pid: number): void {
+  try { process.kill(pid); } catch {
+    try { Bun.spawnSync(["taskkill", "/F", "/PID", String(pid)]); } catch {}
+  }
 }
 
 function killAllDaemons(knownPid?: number | null): number {
   const toKill = new Set<number>(findDaemonPids());
   if (knownPid && knownPid !== process.pid) toKill.add(knownPid);
-  for (const pid of toKill) {
-    try { process.kill(pid, "SIGTERM"); } catch {}
-  }
+  for (const pid of toKill) killDaemon(pid);
   return toKill.size;
 }
 
