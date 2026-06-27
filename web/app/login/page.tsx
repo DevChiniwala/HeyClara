@@ -1,11 +1,39 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import Button from "@/components/ui/Button";
 import GlassCard from "@/components/ui/GlassCard";
+import { login } from "@/lib/auth";
 
 export default function LoginPage() {
+  const router = useRouter();
   const [mode, setMode] = useState<"login" | "register">("login");
+  const [code, setCode] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [error, setError] = useState("");
+
+  const handleLogin = () => {
+    if (login(code)) {
+      router.push("/dashboard");
+    } else {
+      setError("Access code is required");
+    }
+  };
+
+  const handleRegister = () => {
+    if (code.length < 8) {
+      setError("Minimum 8 characters");
+      return;
+    }
+    if (code !== confirm) {
+      setError("Codes do not match");
+      return;
+    }
+    if (login(code)) {
+      router.push("/dashboard");
+    }
+  };
 
   return (
     <div className="min-h-screen bg-surface flex items-center justify-center p-6">
@@ -26,23 +54,32 @@ export default function LoginPage() {
         </div>
 
         <div className="space-y-4">
+          {error && (
+            <div className="px-4 py-2.5 rounded-lg bg-error/10 border border-error/30 text-error text-body-bold font-body-bold text-sm">
+              {error}
+            </div>
+          )}
+
           {mode === "login" ? (
             <>
               <div className="space-y-2">
                 <label className="text-label-caps font-label-caps text-on-surface-variant block uppercase">Access Code</label>
                 <input
                   type="password"
+                  value={code}
+                  onChange={(e) => { setCode(e.target.value); setError(""); }}
+                  onKeyDown={(e) => e.key === "Enter" && handleLogin()}
                   className="w-full bg-surface-container-high border border-outline-variant/50 rounded-lg px-4 py-3 text-on-surface font-log-mono text-[14px] focus:border-brand-orange focus:ring-1 focus:ring-brand-orange transition-colors"
                   placeholder="Enter local access code"
                 />
               </div>
-              <Button className="w-full justify-center py-3 text-sm">
+              <Button className="w-full justify-center py-3 text-sm" onClick={handleLogin}>
                 <span className="material-symbols-outlined mr-2 text-[18px]">lock_open</span>
                 Unlock Dashboard
               </Button>
               <p className="text-center text-label-sm font-label-sm text-on-surface-variant">
                 No code set?{" "}
-                <button className="text-primary hover:underline" onClick={() => setMode("register")}>
+                <button className="text-primary hover:underline" onClick={() => { setMode("register"); setError(""); }}>
                   Set up access
                 </button>
               </p>
@@ -53,6 +90,8 @@ export default function LoginPage() {
                 <label className="text-label-caps font-label-caps text-on-surface-variant block uppercase">Create Access Code</label>
                 <input
                   type="password"
+                  value={code}
+                  onChange={(e) => { setCode(e.target.value); setError(""); }}
                   className="w-full bg-surface-container-high border border-outline-variant/50 rounded-lg px-4 py-3 text-on-surface font-log-mono text-[14px] focus:border-brand-orange focus:ring-1 focus:ring-brand-orange transition-colors"
                   placeholder="Minimum 8 characters"
                 />
@@ -61,17 +100,20 @@ export default function LoginPage() {
                 <label className="text-label-caps font-label-caps text-on-surface-variant block uppercase">Confirm Code</label>
                 <input
                   type="password"
+                  value={confirm}
+                  onChange={(e) => { setConfirm(e.target.value); setError(""); }}
+                  onKeyDown={(e) => e.key === "Enter" && handleRegister()}
                   className="w-full bg-surface-container-high border border-outline-variant/50 rounded-lg px-4 py-3 text-on-surface font-log-mono text-[14px] focus:border-brand-orange focus:ring-1 focus:ring-brand-orange transition-colors"
                   placeholder="Re-enter access code"
                 />
               </div>
-              <Button className="w-full justify-center py-3 text-sm">
+              <Button className="w-full justify-center py-3 text-sm" onClick={handleRegister}>
                 <span className="material-symbols-outlined mr-2 text-[18px]">how_to_reg</span>
                 Initialize Workspace
               </Button>
               <p className="text-center text-label-sm font-label-sm text-on-surface-variant">
                 Already configured?{" "}
-                <button className="text-primary hover:underline" onClick={() => setMode("login")}>
+                <button className="text-primary hover:underline" onClick={() => { setMode("login"); setError(""); }}>
                   Sign in
                 </button>
               </p>

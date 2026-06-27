@@ -188,31 +188,31 @@ function DaemonTab() {
   );
 }
 
+const yamlHtml = `<span style="color:#a78bfa">server</span>:
+  <span style="color:#a78bfa">host</span>: &quot;<span style="color:#4ade80">0.0.0.0</span>&quot;
+  <span style="color:#a78bfa">port</span>: <span style="color:#f97316">8080</span>
+
+<span style="color:#a78bfa">database</span>:
+  <span style="color:#a78bfa">host</span>: <span style="color:#f97316">localhost</span>
+  <span style="color:#a78bfa">port</span>: <span style="color:#f97316">5432</span>
+  <span style="color:#a78bfa">name</span>: &quot;<span style="color:#4ade80">clara_db</span>&quot;
+
+<span style="color:#a78bfa">channels</span>:
+  <span style="color:#a78bfa">telegram</span>:
+    <span style="color:#a78bfa">enabled</span>: <span style="color:#f97316">true</span>
+    <span style="color:#a78bfa">token</span>: &quot;<span style="color:#4ade80">{{TELEGRAM_TOKEN}}</span>&quot;
+  <span style="color:#a78bfa">slack</span>:
+    <span style="color:#a78bfa">enabled</span>: <span style="color:#f97316">false</span>
+
+<span style="color:#a78bfa">logging</span>:
+  <span style="color:#a78bfa">level</span>: <span style="color:#f97316">info</span>
+  <span style="color:#a78bfa">format</span>: <span style="color:#f97316">json</span>
+
+<span style="color:#a78bfa">resources</span>:
+  <span style="color:#a78bfa">max_memory_mb</span>: <span style="color:#f97316">4096</span>
+  <span style="color:#a78bfa">cpu_quota</span>: <span style="color:#f97316">75</span>`;
+
 function YamlTab() {
-  const yamlContent = `server:
-  host: "0.0.0.0"
-  port: 8080
-
-database:
-  host: localhost
-  port: 5432
-  name: clara_db
-
-channels:
-  telegram:
-    enabled: true
-    token: "{{TELEGRAM_TOKEN}}"
-  slack:
-    enabled: false
-
-logging:
-  level: info
-  format: json
-
-resources:
-  max_memory_mb: 4096
-  cpu_quota: 75`;
-
   return (
     <GlassCard>
       <h2 className="text-headline-md font-headline-md text-on-surface mb-2">YAML Configuration</h2>
@@ -228,31 +228,10 @@ resources:
             Save
           </button>
         </div>
-        <pre className="bg-[#0d0d0d] border border-outline-variant/50 rounded-xl p-6 overflow-x-auto text-log-mono font-log-mono text-[13px] leading-relaxed">
-{`1  <span class="text-purple-400">server</span>:
-2    <span class="text-purple-400">host</span>: "<span class="text-green-400">0.0.0.0</span>"
-3    <span class="text-purple-400">port</span>: <span class="text-primary">8080</span>
-4
-5  <span class="text-purple-400">database</span>:
-6    <span class="text-purple-400">host</span>: <span class="text-primary">localhost</span>
-7    <span class="text-purple-400">port</span>: <span class="text-primary">5432</span>
-8    <span class="text-purple-400">name</span>: <span class="text-green-400">clara_db</span>
-9
-10 <span class="text-purple-400">channels</span>:
-11   <span class="text-purple-400">telegram</span>:
-12     <span class="text-purple-400">enabled</span>: <span class="text-primary">true</span>
-13     <span class="text-purple-400">token</span>: "<span class="text-green-400">{{TELEGRAM_TOKEN}}</span>"
-14   <span class="text-purple-400">slack</span>:
-15     <span class="text-purple-400">enabled</span>: <span class="text-primary">false</span>
-16
-17 <span class="text-purple-400">logging</span>:
-18   <span class="text-purple-400">level</span>: <span class="text-primary">info</span>
-19   <span class="text-purple-400">format</span>: <span class="text-primary">json</span>
-20
-21 <span class="text-purple-400">resources</span>:
-22   <span class="text-purple-400">max_memory_mb</span>: <span class="text-primary">4096</span>
-23   <span class="text-purple-400">cpu_quota</span>: <span class="text-primary">75</span>`}
-        </pre>
+        <pre
+          className="bg-[#0d0d0d] border border-outline-variant/50 rounded-xl p-6 overflow-x-auto text-log-mono font-log-mono text-[13px] leading-relaxed"
+          dangerouslySetInnerHTML={{ __html: yamlHtml }}
+        />
       </div>
     </GlassCard>
   );
