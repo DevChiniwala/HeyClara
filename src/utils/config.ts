@@ -13,7 +13,7 @@ const DEFAULTS: ClaraConfig = {
   fallback: [],
   timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
   activeHours: { start: "00:00", end: "23:59" },
-  database_url: "postgres://localhost:5432/clara",
+  database_url: "postgres://postgres@localhost:5432/clara",
   log_level: "info",
   gemini_api_key: null,
   sessionFinalization: {
