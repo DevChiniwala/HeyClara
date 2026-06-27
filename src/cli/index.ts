@@ -89,11 +89,16 @@ program
 
 program
   .command("run")
-  .description("Run a one-shot prompt")
-  .argument("<prompt...>", "Prompt to execute")
-  .action(async (promptArgs: string[]) => {
-    const { runOneShot } = await import("./chat");
-    await runOneShot(promptArgs.join(" "));
+  .description("[daemon] Start the daemon process (internal) or run a one-shot prompt")
+  .argument("[prompt...]", "Prompt to execute (omit to start daemon process)")
+  .action(async (promptArgs: string[] | undefined) => {
+    if (!promptArgs || promptArgs.length === 0) {
+      const { runDaemon } = await import("../core/daemon");
+      await runDaemon();
+    } else {
+      const { runOneShot } = await import("./chat");
+      await runOneShot(promptArgs.join(" "));
+    }
   });
 
 program
@@ -286,6 +291,14 @@ program.command("test")
     const m = await import("./system");
     const extra = process.argv.slice(3).filter((a) => a !== "-v" && a !== "--verbose");
     await m.runTests(options.verbose, extra);
+  });
+
+program
+  .command("web")
+  .description("Launch the web UI (starts daemon if needed)")
+  .action(async () => {
+    const { webStart } = await import("./web");
+    await webStart();
   });
 
 program.command("init").description("Run setup wizard").action(async () => {

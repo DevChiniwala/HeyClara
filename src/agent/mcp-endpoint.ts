@@ -7,13 +7,14 @@ import { log } from "../utils/log";
 import type { NiaTool } from "../mcp/tools/types";
 
 let server: ReturnType<typeof Bun.serve> | null = null;
-const PORT = 0; // random available port
 
 export async function startMcpEndpoint(tools: NiaTool[]): Promise<number> {
   if (server) return server.port ?? 0;
 
+  const port = process.env.CLARA_MCP_PORT ? parseInt(process.env.CLARA_MCP_PORT, 10) : 0;
+
   server = Bun.serve({
-    port: PORT,
+    port,
     async fetch(req) {
       const url = new URL(req.url);
       if (url.pathname === "/tools" && req.method === "GET") {

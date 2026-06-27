@@ -38,6 +38,7 @@ export function startDaemon(): number {
   const proc = Bun.spawn([execPath, scriptPath, "run"], {
     stdio: ["ignore", logFd, logFd],
     env: cleanEnv,
+    detached: true,
   });
 
   proc.unref();

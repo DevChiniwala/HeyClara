@@ -1,9 +1,9 @@
+import yaml from "js-yaml";
 import { readRawConfig, updateRawConfig } from "../utils/config";
 import { fail } from "../utils/cli";
 
 export function configList(): void {
   const raw = readRawConfig();
-  const yaml = require("js-yaml").default;
   console.log(yaml.dump(raw, { lineWidth: -1 }).trim());
 }
 
@@ -18,7 +18,6 @@ export function configGet(key: string): void {
   if (val === undefined) {
     console.log(`${key}: (not set)`);
   } else if (typeof val === "object") {
-    const yaml = require("js-yaml").default;
     console.log(yaml.dump(val, { lineWidth: -1 }).trim());
   } else {
     console.log(`${key} = ${val}`);
