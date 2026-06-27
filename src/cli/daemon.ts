@@ -1,4 +1,4 @@
-import { existsSync } from "fs";
+import { existsSync, readFileSync, statSync, openSync, readSync, closeSync } from "fs";
 import { isRunning, readPid, removePid } from "../utils/pid";
 import { getConfig } from "../utils/config";
 import { getPaths } from "../utils/paths";
@@ -117,14 +117,31 @@ export async function daemonLogs(follow: boolean, channelFilter?: string): Promi
   const { daemonLog } = getPaths();
   if (!existsSync(daemonLog)) fail("No daemon log found. Is clara running?");
 
-  if (channelFilter) {
-    const tailArgs = follow ? ["tail", "-f", daemonLog] : ["tail", "-200", daemonLog];
-    const tail = Bun.spawn(tailArgs, { stdio: ["ignore", "pipe", "inherit"] });
-    const grep = Bun.spawn(["grep", "-i", channelFilter], { stdio: [tail.stdout, "inherit", "inherit"] });
-    await grep.exited;
-  } else {
-    const args = follow ? ["tail", "-f", daemonLog] : ["tail", "-50", daemonLog];
-    const proc = Bun.spawn(args, { stdio: ["ignore", "inherit", "inherit"] });
-    await proc.exited;
+  const filterLines = (lines: string[]) => {
+    if (!channelFilter) return lines;
+    return lines.filter((l) => l.toLowerCase().includes(channelFilter.toLowerCase()));
+  };
+
+  if (!follow) {
+    const lines = readFileSync(daemonLog, "utf8").split("\n").slice(-200);
+    for (const line of filterLines(lines)) console.log(line);
+    return;
+  }
+
+  let { size } = statSync(daemonLog);
+  while (true) {
+    const newSize = statSync(daemonLog).size;
+    if (newSize > size) {
+      const fd = openSync(daemonLog, "r");
+      const buf = Buffer.alloc(newSize - size);
+      readSync(fd, buf, 0, buf.length, size);
+      closeSync(fd);
+      const newLines = buf.toString("utf8").split("\n");
+      for (const line of filterLines(newLines)) {
+        if (line) console.log(line);
+      }
+      size = newSize;
+    }
+    await new Promise((r) => setTimeout(r, 500));
   }
 }
