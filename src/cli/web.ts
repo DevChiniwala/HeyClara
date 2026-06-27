@@ -1,11 +1,12 @@
 /**
  * `clara web` — starts the daemon (if not running) and launches the Next.js web UI.
  */
+import { fileURLToPath } from "url";
 import { isRunning, startDaemon } from "../core/daemon";
 import { log } from "../utils/log";
 
 const COMMON_PORTS = [58109, 3456, 8080, 3001, 54245, 54679, 52472, 57979, 65314];
-const WEB_DIR = new URL("../../web", import.meta.url).pathname;
+const WEB_DIR = fileURLToPath(new URL("../../web", import.meta.url));
 
 async function discoverMcpPort(): Promise<number> {
   // 1. Check env var
@@ -57,7 +58,7 @@ export async function webStart(): Promise<void> {
     NEXT_PUBLIC_CLARA_MCP_URL: endpoint,
   };
 
-  const proc = Bun.spawn(["bun", "run", "dev"], {
+  const proc = Bun.spawn([process.execPath, "run", "dev"], {
     cwd: WEB_DIR,
     stdio: ["inherit", "inherit", "inherit"],
     env,
