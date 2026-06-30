@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import GlassCard from "@/components/ui/GlassCard";
 import Badge from "@/components/ui/Badge";
 import { formatRelativeTime } from "@/lib/utils";
@@ -19,6 +20,7 @@ const historyEntries = Array.from({ length: 25 }, (_, i) => ({
 }));
 
 export default function HistoryPage() {
+  const router = useRouter();
   const [search, setSearch] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
   const perPage = 10;
@@ -87,7 +89,7 @@ export default function HistoryPage() {
                     <span className="material-symbols-outlined text-[12px]">token</span>
                     {entry.tokens} tokens
                   </span>
-                  <button className="text-label-caps font-label-caps text-primary hover:text-primary/80 transition-colors uppercase">
+                  <button onClick={() => router.push(`/chat/${entry.sessionId}`)} className="text-label-caps font-label-caps text-primary hover:text-primary/80 transition-colors uppercase">
                     Open Session
                   </button>
                 </div>

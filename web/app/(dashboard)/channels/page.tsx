@@ -106,7 +106,7 @@ export default function ChannelsPage() {
             </div>
 
             <div className="mt-6 pt-4 border-t border-outline-variant/30 flex justify-end">
-              <button className={`btn-test w-full py-2 border rounded-lg font-body-bold text-sm transition-all ${
+              <button onClick={() => alert(`Testing ${ch.name} connection...`)} className={`btn-test w-full py-2 border rounded-lg font-body-bold text-sm transition-all ${
                 ch.enabled ? "border-brand-orange text-brand-orange" : "border-outline-variant text-on-surface-variant"
               }`}>
                 Test Connection

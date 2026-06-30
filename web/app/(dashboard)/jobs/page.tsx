@@ -82,10 +82,10 @@ export default function JobsPage() {
                 <span className="text-label-caps font-label-caps text-on-surface-variant">Agent: {job.agent}</span>
               </div>
               <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                <button className="w-8 h-8 rounded bg-surface-container-highest flex items-center justify-center text-outline hover:text-primary hover:bg-primary/10 transition-colors">
+                <button onClick={() => alert(`Editing ${job.name}...`)} className="w-8 h-8 rounded bg-surface-container-highest flex items-center justify-center text-outline hover:text-primary hover:bg-primary/10 transition-colors">
                   <span className="material-symbols-outlined text-[18px]">edit</span>
                 </button>
-                <button className="w-8 h-8 rounded bg-surface-container-highest flex items-center justify-center text-outline hover:text-error hover:bg-error/10 transition-colors">
+                <button onClick={() => alert(`Deleting ${job.name}...`)} className="w-8 h-8 rounded bg-surface-container-highest flex items-center justify-center text-outline hover:text-error hover:bg-error/10 transition-colors">
                   <span className="material-symbols-outlined text-[18px]">delete</span>
                 </button>
               </div>

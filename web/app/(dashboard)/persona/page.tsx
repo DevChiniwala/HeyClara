@@ -113,7 +113,7 @@ export default function PersonaPage() {
           <aside className="w-64 border-r border-outline-variant/50 flex-shrink-0 flex flex-col bg-surface-container-lowest/80">
             <div className="px-lg py-md border-b border-outline-variant/50 flex justify-between items-center">
               <span className="text-label-caps font-label-caps text-on-surface-variant uppercase">Files</span>
-              <button className="text-primary hover:text-primary/80 transition-colors">
+              <button onClick={() => alert("New persona not implemented")} className="text-primary hover:text-primary/80 transition-colors">
                 <span className="material-symbols-outlined text-sm">add</span>
               </button>
             </div>

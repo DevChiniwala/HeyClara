@@ -56,10 +56,10 @@ export default function ChatSessionPage() {
             <span className="px-2 py-1 rounded bg-primary/10 text-primary font-label-caps text-label-caps border border-primary/30 uppercase">Local Mode</span>
           </div>
           <div className="flex items-center gap-sm">
-            <button className="p-2 text-on-surface-variant hover:text-primary transition-colors rounded-lg hover:bg-surface-container">
+            <button onClick={() => alert("Downloading chat...")} className="p-2 text-on-surface-variant hover:text-primary transition-colors rounded-lg hover:bg-surface-container">
               <span className="material-symbols-outlined">download</span>
             </button>
-            <button className="p-2 text-on-surface-variant hover:text-error transition-colors rounded-lg hover:bg-surface-container">
+            <button onClick={() => alert("Deleting chat...")} className="p-2 text-on-surface-variant hover:text-error transition-colors rounded-lg hover:bg-surface-container">
               <span className="material-symbols-outlined">delete</span>
             </button>
           </div>
@@ -116,10 +116,10 @@ export default function ChatSessionPage() {
                 onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) e.preventDefault(); }}
               />
               <div className="flex items-center gap-2 pr-1 pb-1 shrink-0">
-                <button className="p-2 text-outline hover:text-on-surface transition-colors rounded-lg">
+                <button onClick={() => alert("Voice input not implemented")} className="p-2 text-outline hover:text-on-surface transition-colors rounded-lg">
                   <span className="material-symbols-outlined">mic</span>
                 </button>
-                <button className="bg-primary text-on-primary p-2 rounded-lg hover:scale-105 active:scale-95 transition-all shadow-[0_0_10px_rgba(249,115,22,0.4)]">
+                <button onClick={() => { if (input.trim()) alert(`Sending: ${input}`); }} className="bg-primary text-on-primary p-2 rounded-lg hover:scale-105 active:scale-95 transition-all shadow-[0_0_10px_rgba(249,115,22,0.4)]">
                   <span className="material-symbols-outlined fill">send</span>
                 </button>
               </div>
