@@ -10,12 +10,6 @@ const mockStream = [
   "[14:29:30] <span class=\"text-primary\">INFO</span> MCP call: list_tools (0.5ms)",
 ];
 
-const levelColors: Record<string, string> = {
-  INFO: "text-primary",
-  WARN: "text-yellow-400",
-  ERROR: "text-error",
-};
-
 export default function McpStream() {
   const [lines, setLines] = useState<string[]>([]);
   const idx = useRef(0);
@@ -31,6 +25,7 @@ export default function McpStream() {
   }, []);
 
   const parseLine = (line: string) => {
+    if (!line) return { time: "", level: "INFO", levelClass: "text-primary", msg: "" };
     const match = line.match(/^\[(.+?)\]\s*<span class="(.+?)">(.+?)<\/span>\s(.+)$/);
     if (!match) return { time: "", level: "INFO", levelClass: "text-primary", msg: line };
     return { time: match[1], level: match[3], levelClass: match[2], msg: match[4] };

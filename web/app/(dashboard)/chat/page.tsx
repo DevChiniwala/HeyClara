@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import Link from "next/link";
 import GlassCard from "@/components/ui/GlassCard";
 import { formatRelativeTime } from "@/lib/utils";
@@ -12,10 +13,15 @@ const mockSessions = [
 ];
 
 export default function ChatListPage() {
+  const router = useRouter();
   const [search, setSearch] = useState("");
   const filtered = mockSessions.filter(s =>
     s.summary?.toLowerCase().includes(search.toLowerCase())
   );
+
+  const handleNewChat = () => {
+    router.push("/chat/new");
+  };
 
   return (
     <div className="flex h-[calc(100vh-8rem)] -mx-gutter -mt-6">
@@ -61,7 +67,7 @@ export default function ChatListPage() {
           <span className="material-symbols-outlined text-6xl block">chat_bubble</span>
           <p className="text-headline-md font-headline-md text-on-surface">Select a session</p>
           <p className="text-body-base font-body-base">Choose a conversation from the left or start a new one.</p>
-          <button className="bg-primary text-on-primary font-body-bold py-md px-lg rounded-lg hover:bg-primary/90 transition-all shadow-[0_0_15px_rgba(249,115,22,0.4)]">
+          <button onClick={handleNewChat} className="bg-primary text-on-primary font-body-bold py-md px-lg rounded-lg hover:bg-primary/90 transition-all shadow-[0_0_15px_rgba(249,115,22,0.4)]">
             <span className="flex items-center gap-sm">
               <span className="material-symbols-outlined fill">add_comment</span>
               New Chat

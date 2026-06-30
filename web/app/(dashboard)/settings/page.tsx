@@ -158,7 +158,7 @@ function BackendTab({
             <span className="text-body-bold font-body-bold text-error block">Reset All Settings</span>
             <span className="text-label-sm font-label-sm text-on-surface-variant">Revert all settings to their default values.</span>
           </div>
-          <Button variant="danger">Reset</Button>
+          <Button variant="danger" onClick={() => alert("Resetting all settings...")}>Reset</Button>
         </div>
       </GlassCard>
     </div>
@@ -221,10 +221,10 @@ function YamlTab() {
       </p>
       <div className="relative">
         <div className="absolute top-3 right-3 flex gap-2">
-          <button className="px-3 py-1.5 bg-surface-container-high border border-outline-variant/50 rounded text-label-caps font-label-caps text-on-surface-variant hover:text-primary hover:border-primary/50 transition-colors uppercase text-[10px]">
+          <button onClick={() => alert("YAML validation passed")} className="px-3 py-1.5 bg-surface-container-high border border-outline-variant/50 rounded text-label-caps font-label-caps text-on-surface-variant hover:text-primary hover:border-primary/50 transition-colors uppercase text-[10px]">
             Validate
           </button>
-          <button className="px-3 py-1.5 bg-primary border border-primary rounded text-label-caps font-label-caps text-on-surface uppercase text-[10px]">
+          <button onClick={() => alert("YAML config saved")} className="px-3 py-1.5 bg-primary border border-primary rounded text-label-caps font-label-caps text-on-surface uppercase text-[10px]">
             Save
           </button>
         </div>

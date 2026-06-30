@@ -171,7 +171,7 @@ export default function SystemPage() {
         <GlassCard className="xl:col-span-5 flex flex-col p-lg">
           <div className="flex justify-between items-center mb-6">
             <h2 className="text-headline-md font-headline-md text-on-surface text-[18px]">Job Subsystem</h2>
-            <button className="text-label-caps font-label-caps uppercase px-3 py-1.5 rounded bg-surface-container border border-outline-variant text-on-surface hover:bg-primary/10 hover:text-primary hover:border-primary/50 transition-colors flex items-center">
+            <button onClick={() => alert("Recovering stale jobs...")} className="text-label-caps font-label-caps uppercase px-3 py-1.5 rounded bg-surface-container border border-outline-variant text-on-surface hover:bg-primary/10 hover:text-primary hover:border-primary/50 transition-colors flex items-center">
               <span className="material-symbols-outlined text-[14px] mr-1">healing</span>
               Recover Stale
             </button>
@@ -201,7 +201,7 @@ export default function SystemPage() {
                 <span className="text-log-mono font-log-mono text-[12px] text-error">ERR_TIMEOUT: wkr_8x</span>
                 <span className="text-label-caps font-label-caps text-on-surface-variant">2 mins ago</span>
               </div>
-              <button className="px-2 py-1 bg-surface-container border border-outline-variant rounded text-[11px] font-bold text-on-surface hover:text-primary hover:border-primary/50 transition-colors">
+              <button onClick={() => alert("Retrying job...")} className="px-2 py-1 bg-surface-container border border-outline-variant rounded text-[11px] font-bold text-on-surface hover:text-primary hover:border-primary/50 transition-colors">
                 RETRY
               </button>
             </div>
@@ -244,14 +244,14 @@ export default function SystemPage() {
                   <td className="py-3 px-4 text-log-mono font-log-mono text-on-surface-variant text-[12px]">
                     {formatRelativeTime(b.createdAt)}
                   </td>
-                  <td className="py-3 px-lg text-right space-x-2">
-                    <button className="text-label-caps font-label-caps text-primary hover:text-primary/80 transition-colors uppercase px-2 py-1">
-                      Restore
-                    </button>
-                    <button className="text-label-caps font-label-caps text-on-surface-variant hover:text-error transition-colors uppercase px-2 py-1">
-                      Delete
-                    </button>
-                  </td>
+<td className="py-3 px-lg text-right space-x-2">
+                      <button onClick={() => alert("Restoring backup...")} className="text-label-caps font-label-caps text-primary hover:text-primary/80 transition-colors uppercase px-2 py-1">
+                        Restore
+                      </button>
+                      <button onClick={() => alert("Deleting backup...")} className="text-label-caps font-label-caps text-on-surface-variant hover:text-error transition-colors uppercase px-2 py-1">
+                        Delete
+                      </button>
+                    </td>
                 </tr>
               ))}
             </tbody>
