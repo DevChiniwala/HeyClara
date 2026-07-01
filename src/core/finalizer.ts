@@ -41,7 +41,7 @@ export async function processPending(): Promise<void> {
         const messages = await Message.getBySession(request.sessionId);
         if (messages.length > 0) {
           const transcript = messages
-            .filter((m) => m.sender === "nia" || m.sender === "user")
+            .filter((m) => m.sender === "clara" || m.sender === "user")
             .map((m) => `${m.sender}: ${m.content}`)
             .join("\n");
           await consolidateMemory(transcript);

@@ -1,18 +1,48 @@
 "use client";
 
-import { useState } from "react";
-import { useParams } from "next/navigation";
-import GlassCard from "@/components/ui/GlassCard";
+import { useState, useMemo } from "react";
+import { useParams, useRouter } from "next/navigation";
+import Link from "next/link";
+import Skeleton from "@/components/ui/Skeleton";
+import { useMCPSessionMessages, useMCPSessions } from "@/lib/use-mcp";
+import { parseSessionMessages, parseSessions } from "@/lib/parsers";
 import { formatDate } from "@/lib/utils";
 
-const mockMessages = [
-  { id: 1, sessionId: "s1", sender: "user", content: "Can you provide a simple React component for a glassmorphic card?", isFromAgent: false, createdAt: new Date(Date.now() - 60000), deliveryStatus: "sent" },
-  { id: 2, sessionId: "s1", sender: "Clara", content: "Certainly. Here is a minimal implementation of a glassmorphic card using Tailwind CSS:\n\n```tsx\nexport const GlassCard = ({ children }) => {\n  return (\n    <div className=\"bg-black/40 backdrop-blur-md border border-[#ff5a1f]/30 rounded-xl p-6 shadow-[0_0_15px_rgba(255,90,31,0.1)]\">\n      {children}\n    </div>\n  );\n};\n```\n\nThis creates a semi-transparent card with an orange border and subtle glow effect.", isFromAgent: true, createdAt: new Date(Date.now() - 30000), deliveryStatus: "sent", metadata: { model: "gpt-4-turbo", tokens_prompt: 45, tokens_completion: 92, cost_usd: 0.0023 } },
-];
+const AGENT_SENDERS = new Set(["Clara", "assistant", "bot", "clara"]);
 
 export default function ChatSessionPage() {
   const params = useParams();
+  const router = useRouter();
+  const sessionId = typeof params.id === "string" ? params.id : null;
   const [input, setInput] = useState("");
+  const [sending, setSending] = useState(false);
+
+  const messagesRaw = useMCPSessionMessages(sessionId);
+  const sessionsRaw = useMCPSessions(20);
+
+  const messages = useMemo(() => messagesRaw.data ? parseSessionMessages(messagesRaw.data) : [], [messagesRaw.data]);
+  const sessions = useMemo(() => sessionsRaw.data ? parseSessions(sessionsRaw.data) : [], [sessionsRaw.data]);
+
+  const currentSession = sessions.find((s) => s.id === sessionId);
+
+  const handleSend = async () => {
+    if (!input.trim() || !sessionId || sending) return;
+    setSending(true);
+    try {
+      const resp = await fetch("/api/send", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: input.trim(), target: "dm" }),
+      });
+      if (!resp.ok) throw new Error(await resp.text());
+      setInput("");
+      messagesRaw.refetch();
+    } catch (err) {
+      alert(`Failed to send: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setSending(false);
+    }
+  };
 
   return (
     <div className="flex h-[calc(100vh-8rem)] -mx-gutter -mt-6">
@@ -25,20 +55,28 @@ export default function ChatSessionPage() {
           </div>
         </div>
         <div className="flex-1 overflow-y-auto p-sm space-y-1">
-          <div className="p-md bg-primary/10 border border-primary/30 rounded-lg cursor-pointer">
-            <div className="flex justify-between items-start mb-1">
-              <h3 className="text-body-bold font-body-bold text-primary truncate text-sm">Project Research</h3>
-              <span className="text-xs text-on-surface-variant">10m ago</span>
+          {sessionsRaw.loading && (
+            <div className="p-md space-y-2">
+              {[1, 2, 3].map((i) => <Skeleton key={i} className="h-12 w-full rounded-lg" />)}
             </div>
-            <p className="text-sm text-on-surface-variant truncate">Discussing architecture for the new module...</p>
-          </div>
-          <div className="p-md rounded-lg cursor-pointer hover:bg-surface-container transition-colors">
-            <div className="flex justify-between items-start mb-1">
-              <h3 className="text-body-bold font-body-bold text-on-surface-variant truncate text-sm">Code Review</h3>
-              <span className="text-xs text-outline">2h ago</span>
-            </div>
-            <p className="text-sm text-outline truncate">Reviewing PR #402 for performance...</p>
-          </div>
+          )}
+          {sessions.map((s) => (
+            <Link key={s.id} href={`/chat/${s.id}`}>
+              <div className={`p-md rounded-lg cursor-pointer transition-colors ${
+                s.id === sessionId
+                  ? "bg-primary/10 border border-primary/30"
+                  : "hover:bg-surface-container"
+              }`}>
+                <div className="flex justify-between items-start mb-1">
+                  <h3 className="text-body-bold font-body-bold truncate text-sm text-on-surface">
+                    {s.preview?.split(" ").slice(0, 3).join(" ") || `Session ${s.id}`}
+                  </h3>
+                  <span className="text-xs text-outline">{s.messageCount} msgs</span>
+                </div>
+                <p className="text-sm text-outline truncate">{s.preview || s.room}</p>
+              </div>
+            </Link>
+          ))}
         </div>
       </div>
 
@@ -52,75 +90,76 @@ export default function ChatSessionPage() {
         {/* Header */}
         <header className="h-16 border-b border-outline-variant bg-surface/60 backdrop-blur-md flex items-center justify-between px-gutter shrink-0 relative z-10">
           <div className="flex items-center gap-md">
-            <h2 className="text-headline-md font-headline-md text-on-surface">Project Research</h2>
+            <h2 className="text-headline-md font-headline-md text-on-surface">
+              {currentSession?.preview?.split(" ").slice(0, 4).join(" ") || "Chat Session"}
+            </h2>
             <span className="px-2 py-1 rounded bg-primary/10 text-primary font-label-caps text-label-caps border border-primary/30 uppercase">Local Mode</span>
           </div>
           <div className="flex items-center gap-sm">
-            <button onClick={() => alert("Downloading chat...")} className="p-2 text-on-surface-variant hover:text-primary transition-colors rounded-lg hover:bg-surface-container">
-              <span className="material-symbols-outlined">download</span>
-            </button>
-            <button onClick={() => alert("Deleting chat...")} className="p-2 text-on-surface-variant hover:text-error transition-colors rounded-lg hover:bg-surface-container">
-              <span className="material-symbols-outlined">delete</span>
+            <button onClick={() => messagesRaw.refetch()} className="p-2 text-on-surface-variant hover:text-primary transition-colors rounded-lg hover:bg-surface-container">
+              <span className="material-symbols-outlined">refresh</span>
             </button>
           </div>
         </header>
 
         {/* Messages */}
         <div className="flex-1 overflow-y-auto p-gutter flex flex-col gap-xl z-10">
-          {mockMessages.map((msg) => (
-            <div key={msg.id} className={`flex ${msg.isFromAgent ? "justify-start" : "justify-end"}`}>
-              <div className={`max-w-[75%] ${msg.isFromAgent ? "" : "bg-surface-container-high border border-outline-variant rounded-2xl rounded-tr-sm"} ${msg.isFromAgent ? "bg-surface-container border border-outline-variant rounded-2xl rounded-tl-sm" : ""} p-md relative group`}>
-                {msg.isFromAgent && (
-                  <div className="absolute -left-3 top-4 w-6 h-6 bg-primary rounded-full flex items-center justify-center shadow-[0_0_10px_rgba(249,115,22,0.5)]">
-                    <span className="material-symbols-outlined text-[12px] text-on-primary fill">smart_toy</span>
-                  </div>
-                )}
-                <div className="text-on-surface font-body-base whitespace-pre-wrap">{msg.content}</div>
-                <div className="flex items-center justify-between mt-2 opacity-50 group-hover:opacity-100 transition-opacity">
-                  <span className="text-[10px] text-on-surface-variant font-log-mono">{formatDate(msg.createdAt)}</span>
-                  <div className="flex items-center gap-2">
-                    {msg.metadata && (
-                      <details className="text-[10px]">
-                        <summary className="text-outline cursor-pointer hover:text-on-surface transition-colors flex items-center gap-1">
-                          <span className="material-symbols-outlined text-[14px]">data_object</span>
-                        </summary>
-                        <pre className="mt-1 bg-surface-dim p-2 rounded border border-outline-variant/50 font-log-mono text-[10px] text-on-surface-variant">
-                          {JSON.stringify(msg.metadata, null, 2)}
-                        </pre>
-                      </details>
-                    )}
-                    {!msg.isFromAgent && (
-                      <span className="material-symbols-outlined text-[14px] text-green-400">done_all</span>
-                    )}
-                  </div>
+          {messagesRaw.loading && (
+            <div className="space-y-4 p-md">
+              {[1, 2, 3].map((i) => (
+                <div key={i} className={`flex ${i % 2 === 0 ? "justify-start" : "justify-end"}`}>
+                  <Skeleton className={`h-20 w-3/4 rounded-2xl ${i % 2 === 0 ? "" : ""}`} />
                 </div>
+              ))}
+            </div>
+          )}
+          {messagesRaw.error && (
+            <div className="flex items-center justify-center h-full">
+              <div className="text-error font-body-base">{messagesRaw.error}</div>
+            </div>
+          )}
+          {!messagesRaw.loading && !messagesRaw.error && messages.length === 0 && (
+            <div className="flex items-center justify-center h-full">
+              <div className="text-center text-on-surface-variant">
+                <span className="material-symbols-outlined text-4xl block mb-2">forum</span>
+                <p>No messages yet. Start the conversation.</p>
               </div>
             </div>
-          ))}
+          )}
+          {messages.map((msg, i) => {
+            const isAgent = AGENT_SENDERS.has(msg.sender);
+            return (
+              <div key={i} className={`flex ${isAgent ? "justify-start" : "justify-end"}`}>
+                <div className={`max-w-[75%] p-md relative group ${
+                  isAgent
+                    ? "bg-surface-container border border-outline-variant rounded-2xl rounded-tl-sm"
+                    : "bg-surface-container-high border border-outline-variant rounded-2xl rounded-tr-sm"
+                }`}>
+                  {isAgent && (
+                    <div className="absolute -left-3 top-4 w-6 h-6 bg-primary rounded-full flex items-center justify-center shadow-[0_0_10px_rgba(249,115,22,0.5)]">
+                      <span className="material-symbols-outlined text-[12px] text-on-primary fill">smart_toy</span>
+                    </div>
+                  )}
+                  <div className="text-on-surface font-body-base whitespace-pre-wrap">{msg.content}</div>
+                </div>
+              </div>
+            );
+          })}
         </div>
 
         {/* Input */}
         <div className="p-gutter border-t border-outline-variant bg-surface/80 backdrop-blur-xl shrink-0 z-10">
           <div className="max-w-4xl mx-auto">
-            <div className="flex items-center gap-2 mb-2">
-              <select className="bg-surface-container border border-outline-variant text-xs text-on-surface-variant rounded-md px-2 py-1 outline-none focus:border-primary">
-                <option>Clara Default</option>
-                <option>Clara Developer</option>
-              </select>
-            </div>
             <div className="relative flex items-end bg-surface-container border border-outline-variant rounded-xl focus-within:border-primary focus-within:ring-2 focus-within:ring-primary/30 transition-all p-2">
               <textarea
                 className="w-full bg-transparent text-on-surface font-body-base outline-none resize-none min-h-[44px] py-2 px-3 placeholder-on-surface-variant"
                 placeholder="Type a message..." rows={1} value={input}
                 onChange={(e) => setInput(e.target.value)}
-                onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) e.preventDefault(); }}
+                onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
               />
               <div className="flex items-center gap-2 pr-1 pb-1 shrink-0">
-                <button onClick={() => alert("Voice input not implemented")} className="p-2 text-outline hover:text-on-surface transition-colors rounded-lg">
-                  <span className="material-symbols-outlined">mic</span>
-                </button>
-                <button onClick={() => { if (input.trim()) alert(`Sending: ${input}`); }} className="bg-primary text-on-primary p-2 rounded-lg hover:scale-105 active:scale-95 transition-all shadow-[0_0_10px_rgba(249,115,22,0.4)]">
-                  <span className="material-symbols-outlined fill">send</span>
+                <button onClick={handleSend} disabled={sending || !input.trim()} className="bg-primary text-on-primary p-2 rounded-lg hover:scale-105 active:scale-95 transition-all shadow-[0_0_10px_rgba(249,115,22,0.4)] disabled:opacity-50 disabled:cursor-not-allowed">
+                  <span className="material-symbols-outlined fill">{sending ? "hourglass_top" : "send"}</span>
                 </button>
               </div>
             </div>

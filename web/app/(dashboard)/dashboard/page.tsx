@@ -1,13 +1,26 @@
+"use client";
+
+import { useMemo } from "react";
 import Link from "next/link";
 import StatCard from "@/components/dashboard/StatCard";
 import ActivityFeed from "@/components/dashboard/ActivityFeed";
 import McpStream from "@/components/dashboard/McpStream";
-
-const sparklineUp = [10, 25, 18, 32, 28, 40, 55];
-const sparklineFlat = [5, 8, 6, 9, 7, 10, 8];
-const sparklineDown = [80, 72, 65, 70, 58, 50, 45];
+import Skeleton from "@/components/ui/Skeleton";
+import { useMCPHealth, useMCPJobs, useMCPSessions } from "@/lib/use-mcp";
+import { parseJobs, parseSessions } from "@/lib/parsers";
 
 export default function DashboardPage() {
+  const health = useMCPHealth();
+  const jobsRaw = useMCPJobs();
+  const sessionsRaw = useMCPSessions(5);
+
+  const jobs = useMemo(() => jobsRaw.data ? parseJobs(jobsRaw.data) : [], [jobsRaw.data]);
+  const sessions = useMemo(() => sessionsRaw.data ? parseSessions(sessionsRaw.data) : [], [sessionsRaw.data]);
+  const daemonOnline = health.data?.status === "ok";
+
+  const activeJobs = jobs.filter((j) => j.status === "active").length;
+  const totalJobs = jobs.length;
+
   return (
     <>
       <header className="mb-sm">
@@ -15,14 +28,57 @@ export default function DashboardPage() {
         <p className="text-body-base font-body-base text-on-surface-variant max-w-2xl">
           Real-time overview of your AI assistant, active tasks, and system telemetry.
         </p>
+        {health.error && (
+          <div className="mt-md px-lg py-md rounded-lg bg-error/10 border border-error/20 text-error font-body-base">
+            Daemon unreachable: {health.error}
+          </div>
+        )}
       </header>
 
       {/* Animated Stat Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-gutter">
-        <StatCard label="Daemon Status" value="Online" icon="terminal" trend="up" sparklineData={sparklineUp} />
-        <StatCard label="Active Sessions" value={3} icon="chat" sparklineData={sparklineFlat} />
-        <StatCard label="Scheduled Jobs" value={7} icon="work" sparklineData={sparklineDown} />
-        <StatCard label="System Health" value="98%" icon="monitor_heart" trend="up" sparklineData={sparklineUp} />
+        {health.loading && jobsRaw.loading ? (
+          <>
+            {[1, 2, 3, 4].map((i) => (
+              <div key={i} className="glass-card rounded-xl p-lg">
+                <Skeleton className="h-4 w-24 mb-4" />
+                <Skeleton className="h-8 w-16 mb-2" />
+                <Skeleton className="h-4 w-12" />
+              </div>
+            ))}
+          </>
+        ) : (
+          <>
+            <StatCard
+              label="Daemon Status"
+              value={daemonOnline ? "Online" : "Offline"}
+              icon="terminal"
+              trend={daemonOnline ? "up" : "down"}
+              sparklineData={undefined}
+            />
+            <StatCard
+              label="Active Sessions"
+              value={sessions.length}
+              icon="chat"
+              trend={sessions.length > 0 ? "up" : undefined}
+              sparklineData={undefined}
+            />
+            <StatCard
+              label="Scheduled Jobs"
+              value={totalJobs}
+              icon="work"
+              trend={activeJobs > 0 ? "up" : undefined}
+              sparklineData={undefined}
+            />
+            <StatCard
+              label="System Health"
+              value={daemonOnline ? "OK" : "Offline"}
+              icon="monitor_heart"
+              trend={daemonOnline ? "up" : "down"}
+              sparklineData={undefined}
+            />
+          </>
+        )}
       </div>
 
       {/* Activity Feed + Sidebar */}

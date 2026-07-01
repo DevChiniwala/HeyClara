@@ -1,32 +1,24 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import GlassCard from "@/components/ui/GlassCard";
 import Badge from "@/components/ui/Badge";
-import { formatRelativeTime } from "@/lib/utils";
-
-const historyEntries = Array.from({ length: 25 }, (_, i) => ({
-  id: `msg_${i}`,
-  preview: i % 3 === 0
-    ? "Can you explain how the transformer attention mechanism works in large language models?"
-    : i % 3 === 1
-      ? "Write a Python function that implements a binary search tree with insert, delete, and traverse methods."
-      : "What are the best practices for deploying machine learning models to production?",
-  timestamp: new Date(Date.now() - i * 3600000 - Math.random() * 86400000),
-  agent: i % 2 === 0 ? "Clara (Default)" : "Clara (Technical)",
-  sessionId: `session_${Math.floor(i / 3)}`,
-  tokens: Math.floor(Math.random() * 1500) + 100,
-}));
+import Skeleton from "@/components/ui/Skeleton";
+import { useMCPMessages } from "@/lib/use-mcp";
+import { parseMessages } from "@/lib/parsers";
 
 export default function HistoryPage() {
   const router = useRouter();
+  const { data: raw, loading, error } = useMCPMessages(50);
+  const messages = useMemo(() => raw ? parseMessages(raw) : [], [raw]);
   const [search, setSearch] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
   const perPage = 10;
 
-  const filtered = historyEntries.filter((e) =>
-    e.preview.toLowerCase().includes(search.toLowerCase())
+  const filtered = messages.filter((e) =>
+    e.content.toLowerCase().includes(search.toLowerCase()) ||
+    e.sender.toLowerCase().includes(search.toLowerCase())
   );
   const totalPages = Math.ceil(filtered.length / perPage);
   const pageEntries = filtered.slice((currentPage - 1) * perPage, currentPage * perPage);
@@ -38,6 +30,7 @@ export default function HistoryPage() {
         <p className="text-body-base font-body-base text-on-surface-variant max-w-2xl">
           Browse past conversations, search message archives, and revisit previous sessions.
         </p>
+        {error && <div className="mt-md text-error text-sm">{error}</div>}
       </header>
 
       <GlassCard className="overflow-hidden p-0">
@@ -52,55 +45,62 @@ export default function HistoryPage() {
                 onChange={(e) => { setSearch(e.target.value); setCurrentPage(1); }}
               />
             </div>
-            <select className="bg-surface-container-high border border-outline-variant/50 rounded-lg px-3 py-2 text-on-surface font-body-base focus:border-brand-orange focus:ring-1 focus:ring-brand-orange transition-colors">
-              <option>All Agents</option>
-              <option>Clara (Default)</option>
-              <option>Clara (Technical)</option>
-            </select>
-            <input
-              type="date"
-              className="bg-surface-container-high border border-outline-variant/50 rounded-lg px-3 py-2 text-on-surface font-body-base focus:border-brand-orange focus:ring-1 focus:ring-brand-orange transition-colors"
-            />
           </div>
         </div>
 
+        {loading && (
+          <div className="divide-y divide-outline-variant/50">
+            {[1, 2, 3, 4, 5].map((i) => (
+              <div key={i} className="px-lg py-4 flex items-start gap-4">
+                <Skeleton className="w-10 h-10 rounded-full shrink-0" />
+                <div className="flex-1 space-y-2">
+                  <Skeleton className="h-4 w-48" />
+                  <Skeleton className="h-3 w-full" />
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {!loading && !error && filtered.length === 0 && (
+          <div className="px-lg py-12 text-center text-on-surface-variant">
+            <span className="material-symbols-outlined text-4xl block mb-2">forum</span>
+            <p className="text-body-base font-body-base">
+              {search ? "No messages match your search." : "No messages yet."}
+            </p>
+          </div>
+        )}
+
         <div className="divide-y divide-outline-variant/50">
-          {pageEntries.map((entry) => (
-            <div
-              key={entry.id}
-              className="px-lg py-4 hover:bg-surface-variant/40 transition-colors cursor-pointer flex items-start gap-4"
-            >
-              <div className="w-10 h-10 rounded-full bg-primary/20 border border-primary/30 flex items-center justify-center flex-shrink-0 mt-0.5">
-                <span className="material-symbols-outlined text-primary text-lg">forum</span>
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-3 mb-1">
-                  <span className="text-body-bold font-body-bold text-on-surface text-sm">{entry.agent}</span>
-                  <Badge variant="info">{entry.sessionId}</Badge>
-                  <span className="text-label-caps font-label-caps text-on-surface-variant ml-auto">
-                    {formatRelativeTime(entry.timestamp)}
+          {pageEntries.map((entry, i) => {
+            const isAgent = !["user", "you"].includes(entry.sender.toLowerCase());
+            return (
+              <div
+                key={i}
+                className="px-lg py-4 hover:bg-surface-variant/40 transition-colors cursor-pointer flex items-start gap-4"
+              >
+                <div className={`w-10 h-10 rounded-full ${isAgent ? "bg-primary/20 border border-primary/30" : "bg-surface-container-high border border-outline-variant"} flex items-center justify-center shrink-0 mt-0.5`}>
+                  <span className={`material-symbols-outlined text-lg ${isAgent ? "text-primary" : "text-on-surface-variant"}`}>
+                    {isAgent ? "smart_toy" : "person"}
                   </span>
                 </div>
-                <p className="text-body-base font-body-base text-on-surface-variant truncate">
-                  {entry.preview}
-                </p>
-                <div className="flex items-center gap-4 mt-2">
-                  <span className="text-label-caps font-label-caps text-on-surface-variant flex items-center gap-1">
-                    <span className="material-symbols-outlined text-[12px]">token</span>
-                    {entry.tokens} tokens
-                  </span>
-                  <button onClick={() => router.push(`/chat/${entry.sessionId}`)} className="text-label-caps font-label-caps text-primary hover:text-primary/80 transition-colors uppercase">
-                    Open Session
-                  </button>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-3 mb-1">
+                    <span className="text-body-bold font-body-bold text-on-surface text-sm">
+                      {entry.sender}
+                    </span>
+                    <Badge variant="info">{isAgent ? "AI" : "User"}</Badge>
+                    <span className="text-label-caps font-label-caps text-on-surface-variant ml-auto">
+                      {entry.timestamp}
+                    </span>
+                  </div>
+                  <p className="text-body-base font-body-base text-on-surface-variant truncate">
+                    {entry.content}
+                  </p>
                 </div>
               </div>
-            </div>
-          ))}
-          {pageEntries.length === 0 && (
-            <div className="px-lg py-12 text-center text-on-surface-variant">
-              No messages match your search.
-            </div>
-          )}
+            );
+          })}
         </div>
 
         {totalPages > 1 && (

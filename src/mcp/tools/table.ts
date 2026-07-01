@@ -1,8 +1,8 @@
 import { z } from "zod";
 import * as handlers from "./index";
-import type { NiaTool } from "./types";
+import type { ClaraTool } from "./types";
 
-export const CLARA_TOOLS: NiaTool[] = [
+export const CLARA_TOOLS: ClaraTool[] = [
   {
     name: "list_jobs",
     description: "List all scheduled jobs with status and next run time",
@@ -192,5 +192,17 @@ export const CLARA_TOOLS: NiaTool[] = [
       voice: z.string().optional(),
     },
     handler: (args) => handlers.placeCall(args),
+  },
+  {
+    name: "list_engines",
+    description: "List all active processing engines",
+    schema: {},
+    handler: () => handlers.listEngines(),
+  },
+  {
+    name: "read_rules",
+    description: "Read all configured behavioral rules",
+    schema: {},
+    handler: () => handlers.readRulesTool(),
   },
 ];
