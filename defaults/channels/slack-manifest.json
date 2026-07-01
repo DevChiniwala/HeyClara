@@ -1,0 +1,77 @@
+{
+  "display_information": {
+    "name": "Clara",
+    "description": "The coworker who never logs off",
+    "background_color": "#f97316",
+    "long_description": "Clara is a personal AI teammate that runs as a background daemon. She handles scheduled jobs, chats across Telegram and Slack, manages your tasks, and watches your systems — so you can focus on the work that matters. She's geeky, direct, and quietly competent. Think of her as the coworker who's already looked into the issue before you mention it.\n\nBuilt by Dev Chiniwala — https://github.com/DevChiniwala/HeyClara"
+  },
+  "features": {
+    "bot_user": {
+      "display_name": "Clara",
+      "always_online": true
+    },
+    "app_home": {
+      "messages_tab_enabled": true,
+      "messages_tab_read_only_enabled": false
+    },
+    "slash_commands": [
+      {
+        "command": "/clara",
+        "description": "Talk to Clara or manage sessions",
+        "usage_hint": "[new | help | <message>]",
+        "should_escape": false
+      },
+      {
+        "command": "/clara-new",
+        "description": "Start a fresh conversation",
+        "should_escape": false
+      }
+    ]
+  },
+  "oauth_config": {
+    "scopes": {
+      "bot": [
+        "app_mentions:read",
+        "bookmarks:write",
+        "channels:history",
+        "channels:join",
+        "channels:read",
+        "chat:write",
+        "commands",
+        "files:read",
+        "files:write",
+        "groups:history",
+        "groups:read",
+        "im:history",
+        "im:read",
+        "im:write",
+        "links:read",
+        "links:write",
+        "mpim:history",
+        "pins:write",
+        "reactions:read",
+        "reactions:write",
+        "users:read",
+        "users:read.email",
+        "users.profile:read"
+      ]
+    }
+  },
+  "settings": {
+    "event_subscriptions": {
+      "bot_events": [
+        "app_mention",
+        "message.channels",
+        "message.groups",
+        "message.im",
+        "message.mpim"
+      ]
+    },
+    "interactivity": {
+      "is_enabled": false
+    },
+    "org_deploy_enabled": false,
+    "socket_mode_enabled": true,
+    "token_rotation_enabled": false
+  }
+}

@@ -1,19 +1,13 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
+import { mcp } from "@/lib/mcp";
 
-const mockLogs = [
-  { time: "14:23:45", level: "INFO", msg: "Daemon started (pid: 3516)" },
-  { time: "14:23:46", level: "INFO", msg: "MCP endpoint started on port 58109" },
-  { time: "14:23:46", level: "INFO", msg: "Scheduler started (60s poll interval)" },
-  { time: "14:24:01", level: "INFO", msg: "alive heartbeat OK" },
-  { time: "14:25:00", level: "INFO", msg: "Memory usage: 245MB / 4096MB" },
-  { time: "14:25:46", level: "INFO", msg: "alive heartbeat OK" },
-  { time: "14:26:46", level: "WARN", msg: "Job memory-promoter: prompt file missing, skipping" },
-  { time: "14:27:01", level: "INFO", msg: "alive heartbeat OK" },
-  { time: "14:28:01", level: "INFO", msg: "alive heartbeat OK" },
-  { time: "14:28:30", level: "ERROR", msg: "Channel telegram: connection timeout" },
-];
+interface LogEntry {
+  time: string;
+  level: string;
+  msg: string;
+}
 
 const levelColor: Record<string, string> = {
   INFO: "text-primary",
@@ -27,23 +21,89 @@ const levelBg: Record<string, string> = {
   ERROR: "bg-error/10 border-error/20",
 };
 
+function parseLogLine(raw: string): LogEntry | null {
+  try {
+    // Try JSON format first (pino logs)
+    const parsed = JSON.parse(raw);
+    const time = parsed.time ? new Date(parsed.time).toLocaleTimeString() : new Date().toLocaleTimeString();
+    return { time, level: parsed.level || "INFO", msg: parsed.msg || raw };
+  } catch {
+    // Fallback: raw text line
+    const now = new Date().toLocaleTimeString();
+    const level = raw.includes("ERROR") ? "ERROR" : raw.includes("WARN") ? "WARN" : "INFO";
+    return { time: now, level, msg: raw };
+  }
+}
+
 export default function ActivityFeed() {
-  const [logs] = useState(mockLogs);
+  const [logs, setLogs] = useState<LogEntry[]>([]);
+  const wsRef = useRef<WebSocket | null>(null);
+  const reconnectRef = useRef<number>(0);
+
+  useEffect(() => {
+    let mounted = true;
+    let retryTimeout: ReturnType<typeof setTimeout>;
+
+    const connect = async () => {
+      try {
+        const wsUrl = await mcp.getWsUrl();
+        if (!mounted) return;
+        const ws = new WebSocket(wsUrl);
+        wsRef.current = ws;
+
+        ws.onmessage = (event) => {
+          if (!mounted) return;
+          const entry = parseLogLine(event.data);
+          if (entry) {
+            setLogs((prev) => [...prev.slice(-99), entry]);
+          }
+        };
+
+        ws.onclose = () => {
+          wsRef.current = null;
+          if (mounted) {
+            retryTimeout = setTimeout(connect, 5000);
+          }
+        };
+
+        ws.onerror = () => {
+          ws.close();
+        };
+      } catch {
+        // MCP not available, use polling fallback
+        if (mounted) {
+          retryTimeout = setTimeout(connect, 10000);
+        }
+      }
+    };
+
+    connect();
+
+    return () => {
+      mounted = false;
+      clearTimeout(retryTimeout);
+      if (wsRef.current) {
+        wsRef.current.close();
+        wsRef.current = null;
+      }
+    };
+  }, []);
 
   return (
     <div className="glass-card rounded-xl flex flex-col h-[400px] overflow-hidden">
       <div className="p-md border-b border-outline-variant flex justify-between items-center bg-surface-container-low/60">
         <h3 className="text-body-bold font-body-bold text-on-surface">Recent Activity</h3>
-        <button className="text-label-caps font-label-caps text-primary hover:text-primary/80 transition-colors uppercase">
-          View All
-        </button>
+        <div className="flex items-center gap-2">
+          <span className="w-2 h-2 rounded-full bg-primary animate-pulse shadow-[0_0_5px_#f97316]" />
+          <span className="text-label-caps font-label-caps text-on-surface-variant uppercase">Live</span>
+        </div>
       </div>
       <div className="flex-1 overflow-y-auto p-md space-y-1.5">
         {logs.length === 0 ? (
           <div className="flex items-center justify-center h-full text-on-surface-variant">
             <div className="text-center">
               <span className="material-symbols-outlined text-4xl mb-2 block">inbox</span>
-              <p className="text-body-base font-body-base">No activity yet.</p>
+              <p className="text-body-base font-body-base">Awaiting daemon logs...</p>
             </div>
           </div>
         ) : (

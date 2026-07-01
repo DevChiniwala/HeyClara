@@ -1,27 +1,55 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-
-const mockStream = [
-  "[14:28:30] <span class=\"text-primary\">INFO</span> MCP call: list_jobs (2ms)",
-  "[14:28:35] <span class=\"text-primary\">INFO</span> MCP call: list_channels (1ms)",
-  "[14:29:01] <span class=\"text-primary\">INFO</span> alive heartbeat OK",
-  "[14:29:15] <span class=\"text-yellow-400\">WARN</span> Job memory-promoter: skipped",
-  "[14:29:30] <span class=\"text-primary\">INFO</span> MCP call: list_tools (0.5ms)",
-];
+import { mcp } from "@/lib/mcp";
 
 export default function McpStream() {
   const [lines, setLines] = useState<string[]>([]);
-  const idx = useRef(0);
+  const wsRef = useRef<WebSocket | null>(null);
 
   useEffect(() => {
-    const interval = setInterval(() => {
-      if (idx.current < mockStream.length) {
-        setLines((prev) => [...prev, mockStream[idx.current]]);
-        idx.current++;
+    let mounted = true;
+    let retryTimeout: ReturnType<typeof setTimeout>;
+
+    const connect = async () => {
+      try {
+        const wsUrl = await mcp.getWsUrl();
+        if (!mounted) return;
+        const ws = new WebSocket(wsUrl);
+        wsRef.current = ws;
+
+        ws.onmessage = (event) => {
+          if (!mounted) return;
+          const raw = typeof event.data === "string" ? event.data : "";
+          const time = new Date().toLocaleTimeString();
+          let level = "INFO";
+          let msg = raw;
+          try {
+            const parsed = JSON.parse(raw);
+            msg = parsed.msg || raw;
+            level = parsed.level || "INFO";
+          } catch { /* raw text */ }
+          const levelClass = level === "WARN" ? "text-yellow-400" : level === "ERROR" ? "text-error" : "text-primary";
+          setLines((prev) => [...prev.slice(-49), `[${time}] <span class="${levelClass}">${level}</span> ${msg}`]);
+        };
+
+        ws.onclose = () => {
+          wsRef.current = null;
+          if (mounted) retryTimeout = setTimeout(connect, 5000);
+        };
+
+        ws.onerror = () => ws.close();
+      } catch {
+        if (mounted) retryTimeout = setTimeout(connect, 10000);
       }
-    }, 3000);
-    return () => clearInterval(interval);
+    };
+
+    connect();
+    return () => {
+      mounted = false;
+      clearTimeout(retryTimeout);
+      if (wsRef.current) { wsRef.current.close(); wsRef.current = null; }
+    };
   }, []);
 
   const parseLine = (line: string) => {

@@ -32,3 +32,8 @@ export async function listEmployeesTool(): Promise<string> {
     .map((e) => `- **${e.name}**: ${e.role} @ ${e.project}${e.model ? ` (model: ${e.model})` : ""}${e.enabled ? "" : " [disabled]"}`)
     .join("\n");
 }
+
+export async function readRulesTool(): Promise<string> {
+  const rules = readRules();
+  return rules || "No rules configured.";
+}

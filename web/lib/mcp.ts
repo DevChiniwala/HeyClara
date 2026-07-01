@@ -47,6 +47,15 @@ export class MCPClient {
     return this.discover();
   }
 
+  async getBaseUrl(): Promise<string> {
+    return this.ensureConnected();
+  }
+
+  async getWsUrl(): Promise<string> {
+    const base = await this.ensureConnected();
+    return base.replace(/^http/, "ws") + "/ws/logs";
+  }
+
   async listTools(): Promise<ToolDef[]> {
     const url = await this.ensureConnected();
     const resp = await fetch(`${url}/tools`);

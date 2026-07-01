@@ -1,22 +1,20 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import GlassCard from "@/components/ui/GlassCard";
-import { formatRelativeTime } from "@/lib/utils";
-
-const mockSessions = [
-  { id: "s1", room: "main", summary: "Discussing architecture for the new module", createdAt: new Date(Date.now() - 10 * 60000), updatedAt: new Date() },
-  { id: "s2", room: "main", summary: "Reviewing PR #402 for performance", createdAt: new Date(Date.now() - 2 * 3600000), updatedAt: new Date(Date.now() - 2 * 3600000) },
-  { id: "s3", room: "main", summary: "Setting up sprint goals for Q3", createdAt: new Date(Date.now() - 86400000), updatedAt: new Date(Date.now() - 86400000) },
-];
+import Skeleton from "@/components/ui/Skeleton";
+import { useMCPSessions } from "@/lib/use-mcp";
+import { parseSessions } from "@/lib/parsers";
 
 export default function ChatListPage() {
   const router = useRouter();
+  const { data: raw, loading, error } = useMCPSessions(50);
+  const sessions = useMemo(() => raw ? parseSessions(raw) : [], [raw]);
   const [search, setSearch] = useState("");
-  const filtered = mockSessions.filter(s =>
-    s.summary?.toLowerCase().includes(search.toLowerCase())
+
+  const filtered = sessions.filter((s) =>
+    s.preview?.toLowerCase().includes(search.toLowerCase())
   );
 
   const handleNewChat = () => {
@@ -38,9 +36,24 @@ export default function ChatListPage() {
           </div>
         </div>
         <div className="flex-1 overflow-y-auto p-sm flex flex-col gap-xs">
-          {filtered.length === 0 && (
+          {loading && (
+            <div className="p-md space-y-3">
+              {[1, 2, 3].map((i) => (
+                <div key={i} className="glass-card rounded-lg p-md">
+                  <Skeleton className="h-4 w-48 mb-2" />
+                  <Skeleton className="h-3 w-64" />
+                </div>
+              ))}
+            </div>
+          )}
+          {error && (
+            <div className="p-md text-error text-sm">
+              Failed to load sessions: {error}
+            </div>
+          )}
+          {!loading && !error && filtered.length === 0 && (
             <div className="text-center text-on-surface-variant text-sm p-md">
-              No sessions found. Start a new chat.
+              {search ? "No sessions match your search." : "No sessions yet. Start a new chat."}
             </div>
           )}
           {filtered.map((s) => (
@@ -48,13 +61,13 @@ export default function ChatListPage() {
               <div className="p-md glass-card rounded-lg cursor-pointer">
                 <div className="flex justify-between items-start mb-1">
                   <h3 className="text-body-bold font-body-bold text-on-surface truncate pr-4">
-                    {s.summary?.split(" ").slice(0, 4).join(" ") || "New Session"}
+                    {s.preview?.split(" ").slice(0, 4).join(" ") || `Session ${s.id}`}
                   </h3>
                   <span className="text-xs text-on-surface-variant whitespace-nowrap">
-                    {formatRelativeTime(s.updatedAt)}
+                    {s.messageCount} msgs
                   </span>
                 </div>
-                <p className="text-sm text-on-surface-variant truncate">{s.summary}</p>
+                <p className="text-sm text-on-surface-variant truncate">{s.preview || `Room: ${s.room}`}</p>
               </div>
             </Link>
           ))}
