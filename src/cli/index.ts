@@ -293,14 +293,6 @@ program.command("test")
     await m.runTests(options.verbose, extra);
   });
 
-program
-  .command("web")
-  .description("Launch the web UI (starts daemon if needed)")
-  .action(async () => {
-    const { webStart } = await import("./web");
-    await webStart();
-  });
-
 program.command("init").description("Run setup wizard").action(async () => {
   const { setupWizard } = await import("./init");
   await setupWizard();
