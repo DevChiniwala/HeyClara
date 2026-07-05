@@ -1,320 +1,642 @@
 #!/usr/bin/env bun
-import { Command } from "commander";
-import { mkdirSync } from "fs";
-import { readFileSync } from "fs";
-import { join } from "path";
-import { getClaraHome } from "../utils/paths";
+import { existsSync, mkdirSync } from "fs";
+import { isRunning, readPid, runDaemon, startDaemon, stopDaemon } from "../core/daemon";
 import { getConfig } from "../utils/config";
+import { localTime } from "../utils/time";
+import { startRepl } from "../chat/repl";
+import { Message } from "../db/models";
+import { withDb } from "../db/with-db";
+import { getNiaHome, getPaths } from "../utils/paths";
+import { errMsg } from "../utils/errors";
+import { fail, ICON_PASS, ICON_WARN } from "../utils/cli";
+import { jobCommand } from "./job";
+import { statusCommand } from "./status";
+import { activeCommand } from "./active";
+import { modelCommand } from "./model";
+import { sendCommand, telegramCommand, slackCommand } from "./channels";
+import { phoneCommand } from "./phone";
+import { rulesCommand, memoryCommand } from "./self";
+import { watchCommand } from "./watch";
+import { agentCommand } from "./agent";
+import { employeeCommand } from "./employee";
+import { guardActiveEngines, parseGuardFlags, withDefaultWait } from "../core/engine-guard";
 
-const program = new Command();
-const pkg = readPackageJson();
-
-program
-  .name("clara")
-  .description("HeyClara \u2014 your personal AI assistant daemon")
-  .version(pkg.version, "-v, --version");
-
-// Ensure ~/.clara/ exists for commands that need it
-setupHomeDir();
-
-// Set log level early
-try { const config = getConfig(); if (config.log_level) process.env.LOG_LEVEL = config.log_level; } catch {}
-
-// ---------------------------------------------------------------------------
-// Daemon commands
-// ---------------------------------------------------------------------------
-program
-  .command("start")
-  .description("Start the daemon")
-  .action(async () => {
-    const { daemonStart } = await import("./daemon");
-    await daemonStart();
-  });
-
-program
-  .command("stop")
-  .description("Stop the daemon")
-  .option("--wait <minutes>", "Wait N minutes for active engines", parseInt)
-  .option("--force", "Force stop without waiting")
-  .action(async (options) => {
-    const { daemonStop } = await import("./daemon");
-    await daemonStop(options);
-  });
-
-program
-  .command("restart")
-  .description("Restart the daemon")
-  .option("--wait <minutes>", "Wait N minutes for active engines", parseInt)
-  .option("--force", "Force restart without waiting")
-  .action(async (options) => {
-    const { daemonRestart } = await import("./daemon");
-    await daemonRestart(options);
-  });
-
-program
-  .command("status")
-  .description("Show daemon status")
-  .action(async () => {
-    const { daemonStatus } = await import("./daemon");
-    await daemonStatus();
-  });
-
-program
-  .command("logs")
-  .description("View daemon logs")
-  .option("-f, --follow", "Follow log output")
-  .option("--channel <name>", "Filter by channel")
-  .action(async (options) => {
-    const { daemonLogs } = await import("./daemon");
-    await daemonLogs(options.follow, options.channel);
-  });
-
-// ---------------------------------------------------------------------------
-// Chat commands
-// ---------------------------------------------------------------------------
-program
-  .command("chat")
-  .description("Start an interactive chat session")
-  .option("-c, --continue", "Continue last session")
-  .option("-r, --resume", "Pick a session to resume")
-  .option("--channel <name>", "Simulate a channel")
-  .option("--employee <name>", "Chat in employee context")
-  .option("--agent <name>", "Chat in agent context")
-  .option("--job <name>", "Chat in job context")
-  .action(async (options) => {
-    const { startRepl } = await import("../chat/repl");
-    const mode = options.continue ? "continue" as const : options.resume ? "pick" as const : "new" as const;
-    await startRepl(mode, options.channel, { employee: options.employee, agent: options.agent, job: options.job });
-  });
-
-program
-  .command("run")
-  .description("[daemon] Start the daemon process (internal) or run a one-shot prompt")
-  .argument("[prompt...]", "Prompt to execute (omit to start daemon process)")
-  .action(async (promptArgs: string[] | undefined) => {
-    if (!promptArgs || promptArgs.length === 0) {
-      const { runDaemon } = await import("../core/daemon");
-      await runDaemon();
-    } else {
-      const { runOneShot } = await import("./chat");
-      await runOneShot(promptArgs.join(" "));
-    }
-  });
-
-program
-  .command("history")
-  .description("View recent messages")
-  .argument("[room]", "Filter by room")
-  .action(async (room) => {
-    const m = await import("./system");
-    await m.showHistory(room);
-  });
-
-// ---------------------------------------------------------------------------
-// Job commands
-// ---------------------------------------------------------------------------
-const jobCmd = program
-  .command("job")
-  .description("Manage scheduled jobs");
-
-jobCmd.command("list").description("List all jobs").action(async () => {
-  const { jobList } = await import("./jobs");
-  await jobList();
-});
-
-jobCmd.command("show").argument("<name>", "Job name").description("Show job details").action(async (name) => {
-  const { jobShow } = await import("./jobs");
-  await jobShow(name);
-});
-
-jobCmd.command("add")
-  .argument("<name>", "Job name")
-  .argument("<schedule>", "Schedule (cron, interval, or timestamp)")
-  .argument("<prompt>", "Job prompt")
-  .option("--type <type>", "Schedule type (cron|interval|once)")
-  .option("--always", "Run 24/7 ignoring active hours")
-  .option("--agent <name>", "Agent name")
-  .option("--employee <name>", "Employee name")
-  .option("--model <model>", "Model override")
-  .option("--stateless", "Disable working memory")
-  .description("Add a new job")
-  .action(async (name, schedule, prompt, options) => {
-    const { jobAdd } = await import("./jobs");
-    await jobAdd(name, schedule, prompt, options);
-  });
-
-jobCmd.command("update")
-  .argument("<name>", "Job name")
-  .option("--schedule <schedule>", "New schedule")
-  .option("--prompt <prompt>", "New prompt")
-  .option("--type <type>", "Schedule type")
-  .option("--always", "Run 24/7")
-  .option("--no-always", "Respect active hours")
-  .option("--agent <name>", "Agent name")
-  .option("--employee <name>", "Employee name")
-  .option("--model <model>", "Model override")
-  .option("--stateless", "Disable working memory")
-  .option("--no-stateless", "Enable working memory")
-  .description("Update an existing job")
-  .action(async (name, options) => {
-    const { jobUpdate } = await import("./jobs");
-    await jobUpdate(name, options);
-  });
-
-jobCmd.command("remove").argument("<name>", "Job name").description("Remove a job").action(async (name) => {
-  const { jobRemove } = await import("./jobs");
-  await jobRemove(name);
-});
-
-jobCmd.command("enable").argument("<name>", "Job name").description("Enable a job").action(async (name) => {
-  const { jobEnable } = await import("./jobs");
-  await jobEnable(name);
-});
-
-jobCmd.command("disable").argument("<name>", "Job name").description("Disable a job").action(async (name) => {
-  const { jobDisable } = await import("./jobs");
-  await jobDisable(name);
-});
-
-jobCmd.command("run").argument("<name>", "Job name").description("Run a job immediately").action(async (name) => {
-  const { jobRunNow } = await import("./jobs");
-  await jobRunNow(name);
-});
-
-// ---------------------------------------------------------------------------
-// Persona commands
-// ---------------------------------------------------------------------------
-const personaCmd = program.command("persona").description("Manage persona");
-
-personaCmd.command("rules").argument("[action]", "show or reset").action(async (action) => {
-  const m = await import("./persona");
-  if (action === "reset") m.rulesReset();
-  else m.rulesShow();
-});
-
-personaCmd.command("memory").argument("[action]", "show or reset").action(async (action) => {
-  const m = await import("./persona");
-  if (action === "reset") m.memoryReset();
-  else m.memoryShow();
-});
-
-personaCmd.command("agents").argument("[action]", "list or show").argument("[name]", "Agent name").action(async (action, name) => {
-  const m = await import("./persona");
-  if (action === "show" && name) m.agentShow(name);
-  else m.agentsList();
-});
-
-personaCmd.command("employees").description("List employees").action(async () => {
-  const m = await import("./persona");
-  m.employeesList();
-});
-
-personaCmd.command("skills").argument("[source]", "Filter by source").description("List skills").action(async (source) => {
-  const m = await import("./persona");
-  m.skillsList(source);
-});
-
-// ---------------------------------------------------------------------------
-// Config commands
-// ---------------------------------------------------------------------------
-const configCmd = program.command("config").description("Manage configuration");
-
-configCmd.command("list").description("Show all config").action(async () => {
-  const m = await import("./config");
-  m.configList();
-});
-
-configCmd.command("get").argument("<key>", "Config key (dot notation)").description("Get a config value").action(async (key) => {
-  const m = await import("./config");
-  m.configGet(key);
-});
-
-configCmd.command("set").argument("<key>", "Config key").argument("<value>", "Config value").description("Set a config value").action(async (key, value) => {
-  const m = await import("./config");
-  m.configSet(key, value);
-});
-
-// ---------------------------------------------------------------------------
-// Channel commands
-// ---------------------------------------------------------------------------
-program.command("channels")
-  .description("Toggle channels")
-  .argument("<action>", "on or off")
-  .argument("[channel]", "Channel name (telegram, slack, sms, whatsapp)")
-  .action(async (action, channel) => {
-    const m = await import("./channels");
-    m.channelsToggle(action, channel);
-  });
-
-// ---------------------------------------------------------------------------
-// System commands
-// ---------------------------------------------------------------------------
-const dbCmd = program.command("db").description("Database operations");
-
-dbCmd.command("setup").description("Setup database").action(async () => {
-  const m = await import("./system");
-  await m.dbSetup();
-});
-
-dbCmd.command("migrate").description("Run database migrations").action(async () => {
-  const m = await import("./system");
-  await m.dbMigrate();
-});
-
-dbCmd.command("status").description("Check database connection").action(async () => {
-  const m = await import("./system");
-  await m.dbStatus();
-});
-
-program.command("health").description("Run health checks").action(async () => {
-  const m = await import("./system");
-  await m.healthCheck();
-});
-
-const backupCmd = program.command("backup").description("Manage backups");
-
-backupCmd.command("create").description("Create a backup").action(async () => {
-  const m = await import("./system");
-  await m.backupCreate();
-});
-
-backupCmd.command("list").description("List backups").action(async () => {
-  const m = await import("./system");
-  await m.backupList();
-});
-
-program.command("test")
-  .description("Run tests")
-  .option("-v, --verbose", "Verbose output")
-  .allowUnknownOption(true)
-  .action(async (options) => {
-    const m = await import("./system");
-    const extra = process.argv.slice(3).filter((a) => a !== "-v" && a !== "--verbose");
-    await m.runTests(options.verbose, extra);
-  });
-
-program.command("init").description("Run setup wizard").action(async () => {
-  const { setupWizard } = await import("./init");
-  await setupWizard();
-});
-
-program.parse(process.argv);
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-function readPackageJson(): { version: string; name: string } {
-  try {
-    const p = join(import.meta.dir, "..", "..", "package.json");
-    return JSON.parse(readFileSync(p, "utf8"));
-  } catch { return { version: "0.0.0", name: "heyclara" }; }
+// Set LOG_LEVEL from config before anything else logs
+try {
+  const config = getConfig();
+  if (config.log_level) {
+    process.env.LOG_LEVEL = config.log_level;
+  }
+} catch {
+  // config.yaml may not exist yet (e.g. before `clara init`)
 }
 
-function setupHomeDir(): void {
-  const skip = new Set(["init", "help", "version", "-v", "--version", "-h", "--help"]);
-  const cmd = process.argv[2];
-  if (cmd && !skip.has(cmd)) {
-    mkdirSync(getClaraHome(), { recursive: true });
+const command = process.argv[2];
+
+// Ensure ~/.heyclara/ exists for commands that need it
+if (command && !["init", "help", "version", "-v", "--version", "-h", "--help"].includes(command)) {
+  mkdirSync(getNiaHome(), { recursive: true });
+}
+
+const STARTUP_MARKERS: Record<string, string> = {
+  telegram: "telegram bot polling started",
+  slack: "slack bot started",
+  scheduler: "scheduler started",
+};
+
+async function awaitStartup(timeout = 60_000): Promise<void> {
+  const { daemonLog } = getPaths();
+  const config = getConfig();
+  const expecting = new Set<string>();
+  if (config.channels.enabled) {
+    if (config.channels.telegram.enabled && config.channels.telegram.bot_token) expecting.add("telegram");
+    if (config.channels.slack.enabled && config.channels.slack.bot_token && config.channels.slack.app_token) {
+      expecting.add("slack");
+    }
+  }
+  expecting.add("scheduler");
+
+  if (expecting.size === 0) return;
+
+  const { readFileSync } = await import("fs");
+  const ready = new Set<string>();
+  let logOffset = 0;
+  try {
+    logOffset = readFileSync(daemonLog, "utf8").length;
+  } catch {}
+
+  const startTime = Date.now();
+  while (ready.size < expecting.size && Date.now() - startTime < timeout) {
+    await new Promise((r) => setTimeout(r, 500));
+    let content = "";
+    try {
+      content = readFileSync(daemonLog, "utf8").slice(logOffset);
+    } catch {
+      continue;
+    }
+
+    for (const name of expecting) {
+      if (ready.has(name)) continue;
+      if (content.includes(STARTUP_MARKERS[name])) {
+        ready.add(name);
+        console.log(`  ${ICON_PASS} ${name}`);
+      }
+    }
+  }
+
+  const pending = [...expecting].filter((e) => !ready.has(e));
+  if (pending.length > 0) {
+    console.log(`  ${ICON_WARN} timed out waiting for: ${pending.join(", ")}`);
+  }
+}
+
+switch (command) {
+  case "version":
+  case "-v":
+  case "--version": {
+    const { version } = await import("../../package.json");
+    console.log(`clara v${version}`);
+    break;
+  }
+
+  case "start": {
+    if (isRunning()) fail(`clara is already running (pid: ${readPid()})`);
+    const { registerService } = await import("../commands/service");
+    await registerService(); // launchd/systemd starts the daemon via RunAtLoad/enable --now
+    // Give service manager a moment to spawn the process and write pidfile
+    await new Promise((r) => setTimeout(r, 1000));
+    // Only spawn manually if no service manager picked it up
+    if (!isRunning()) {
+      startDaemon();
+    }
+    const pid = readPid();
+    console.log(`clara starting${pid ? ` (pid: ${pid})` : ""}...`);
+    await awaitStartup();
+    console.log("nia started");
+    break;
+  }
+
+  case "stop": {
+    if (!isRunning()) fail("nia is not running");
+    const stopGuard = parseGuardFlags(process.argv.slice(3));
+    if (!(await guardActiveEngines("stop", stopGuard))) process.exit(1);
+    const { unregisterService } = await import("../commands/service");
+    await unregisterService({ force: stopGuard.force });
+    stopDaemon({ force: stopGuard.force });
+    console.log("nia stopped");
+    break;
+  }
+
+  case "status": {
+    await statusCommand(process.argv.slice(3));
+    break;
+  }
+
+  case "active": {
+    await activeCommand(process.argv.slice(3));
+    break;
+  }
+
+  case "model": {
+    await modelCommand(process.argv.slice(3));
+    break;
+  }
+
+  case "health": {
+    const { healthCommand } = await import("../commands/health");
+    await healthCommand();
+    break;
+  }
+
+  case "restart": {
+    const restartGuard = parseGuardFlags(process.argv.slice(3));
+    if (!(await guardActiveEngines("restart", restartGuard))) process.exit(1);
+    const { isServiceInstalled, restartService } = await import("../commands/service");
+    if (isServiceInstalled()) {
+      await restartService({ force: restartGuard.force });
+    } else {
+      stopDaemon({ force: restartGuard.force });
+      startDaemon();
+    }
+    const restartPid = readPid();
+    console.log(`clara restarting${restartPid ? ` (pid: ${restartPid})` : ""}...`);
+    await awaitStartup();
+    console.log("nia restarted");
+    break;
+  }
+
+  case "run": {
+    const prompt = process.argv.slice(3).join(" ");
+    if (prompt) {
+      const { createChatEngine } = await import("../chat/engine");
+      const { getMcpServers } = await import("../mcp");
+      const { DIM, RESET: RST, CLEAR_LINE, SPINNER: FRAMES } = await import("../utils/cli");
+      let frame = 0;
+      let statusText = "thinking";
+      let spinTimer: ReturnType<typeof setInterval> | null = null;
+      let streamedLen = 0;
+      let streaming = false;
+
+      const renderSpinner = () => {
+        process.stderr.write(`${CLEAR_LINE}${DIM}  ${FRAMES[frame]} ${statusText}${RST}`);
+        frame = (frame + 1) % FRAMES.length;
+      };
+
+      await withDb(async () => {
+        const engine = await createChatEngine({
+          room: "cli-run",
+          channel: "terminal",
+          resume: false,
+          mcpServers: getMcpServers(),
+        });
+        spinTimer = setInterval(renderSpinner, 80);
+        renderSpinner();
+
+        const { result, costUsd, turns } = await engine.send(prompt, {
+          onStream(textSoFar) {
+            if (!streaming) {
+              if (spinTimer) {
+                clearInterval(spinTimer);
+                spinTimer = null;
+              }
+              process.stderr.write("\x1b[2K\r");
+              streaming = true;
+            }
+            const chunk = textSoFar.slice(streamedLen);
+            if (chunk) {
+              process.stdout.write(chunk);
+              streamedLen = textSoFar.length;
+            }
+          },
+          onActivity(text) {
+            if (!streaming) statusText = text;
+          },
+        });
+
+        if (spinTimer) {
+          clearInterval(spinTimer);
+          spinTimer = null;
+        }
+
+        if (!streaming && result.trim()) {
+          process.stderr.write("\x1b[2K\r");
+          process.stdout.write(result.trim());
+        } else if (streaming) {
+          const rest = result.slice(streamedLen);
+          if (rest.trim()) process.stdout.write(rest);
+        } else {
+          process.stderr.write("\x1b[2K\r");
+        }
+
+        const costStr = costUsd > 0 ? `$${costUsd.toFixed(4)}` : "";
+        const turnsStr = turns > 0 ? `${turns} turn${turns !== 1 ? "s" : ""}` : "";
+        const meta = [costStr, turnsStr].filter(Boolean).join(" · ");
+        if (meta) process.stderr.write(`\n${DIM}${meta}${RST}`);
+        process.stdout.write("\n");
+
+        await engine.close();
+      });
+      process.exit(0);
+    } else {
+      await runDaemon();
+    }
+    break;
+  }
+
+  case "job": {
+    await jobCommand();
+    break;
+  }
+
+  case "rules": {
+    rulesCommand();
+    break;
+  }
+
+  case "memory": {
+    memoryCommand();
+    break;
+  }
+
+  case "watch": {
+    watchCommand();
+    break;
+  }
+
+  case "history": {
+    const room = process.argv[3];
+    try {
+      await withDb(async () => {
+        const messages = await Message.getRecent(20, room);
+        if (messages.length === 0) {
+          console.log("No messages yet.");
+        } else {
+          for (const m of messages) {
+            const time = localTime(new Date(m.createdAt));
+            const prefix = m.sender === "user" ? "you" : m.sender;
+            const roomTag = room ? "" : `[${m.room}] `;
+            const snippet = m.content.length > 120 ? m.content.slice(0, 120) + "..." : m.content;
+            console.log(`  ${roomTag}${time}  ${prefix} > ${snippet.replace(/\n/g, " ")}`);
+          }
+        }
+      });
+    } catch (err) {
+      fail(`Failed: ${errMsg(err)}`);
+    }
+    break;
+  }
+
+  case "logs": {
+    const { daemonLog } = getPaths();
+    if (!existsSync(daemonLog)) fail("No daemon log found. Is clara running?");
+    const logArgs = process.argv.slice(3);
+    const follow = logArgs.includes("-f") || logArgs.includes("--follow");
+    // --channel <name> filters logs by channel/component via grep
+    const chIdx = logArgs.indexOf("--channel");
+    const channelFilter = chIdx !== -1 && logArgs[chIdx + 1] ? logArgs[chIdx + 1] : null;
+
+    if (channelFilter) {
+      // Pipe through grep to filter by channel name in structured logs
+      const tailArgs = follow ? ["tail", "-f", daemonLog] : ["tail", "-200", daemonLog];
+      const tail = Bun.spawn(tailArgs, {
+        stdio: ["ignore", "pipe", "inherit"],
+      });
+      const grep = Bun.spawn(["grep", "-i", channelFilter], {
+        stdio: [tail.stdout, "inherit", "inherit"],
+      });
+      await grep.exited;
+    } else {
+      const args = follow ? ["tail", "-f", daemonLog] : ["tail", "-50", daemonLog];
+      const proc = Bun.spawn(args, { stdio: ["ignore", "inherit", "inherit"] });
+      await proc.exited;
+    }
+    break;
+  }
+
+  case "seed": {
+    await import("../db/seed");
+    break;
+  }
+
+  case "chat": {
+    const chatArgs = process.argv.slice(3);
+    const mode =
+      chatArgs.includes("--continue") || chatArgs.includes("-c")
+        ? ("continue" as const)
+        : chatArgs.includes("--resume") || chatArgs.includes("-r")
+          ? ("pick" as const)
+          : ("new" as const);
+    const flagVal = (flag: string) => {
+      const idx = chatArgs.indexOf(flag);
+      return idx !== -1 && chatArgs[idx + 1] ? chatArgs[idx + 1] : undefined;
+    };
+    const simChannel = flagVal("--channel");
+    const context = {
+      employee: flagVal("--employee"),
+      agent: flagVal("--agent"),
+      job: flagVal("--job"),
+    };
+    const hasContext = context.employee || context.agent || context.job;
+    await startRepl(mode, simChannel, hasContext ? context : undefined);
+    break;
+  }
+
+  case "agent": {
+    await agentCommand();
+    break;
+  }
+
+  case "employee": {
+    await employeeCommand();
+    break;
+  }
+
+  case "skills": {
+    const { scanSkills: loadSkills } = await import("../core/skills");
+    const filter = process.argv[3]; // e.g. "project", "clara", "shared", "claude"
+    let skills = loadSkills();
+    if (filter) {
+      skills = skills.filter((s) => s.source === filter);
+    }
+    if (skills.length === 0) {
+      console.log(filter ? `No skills found in "${filter}".` : "No skills found.");
+    } else {
+      for (const s of skills) {
+        const tag = filter ? "" : `  [${s.source}]`;
+        console.log(`  ${s.name}${tag}`);
+      }
+    }
+    break;
+  }
+
+  case "send": {
+    await sendCommand();
+    break;
+  }
+
+  case "telegram": {
+    telegramCommand();
+    break;
+  }
+
+  case "slack": {
+    await slackCommand();
+    break;
+  }
+
+  case "phone": {
+    await phoneCommand();
+    break;
+  }
+
+  case "config": {
+    const configSub = process.argv[3];
+    const configKey = process.argv[4];
+    const configVal = process.argv.slice(5).join(" ");
+    const { readRawConfig, updateRawConfig } = await import("../utils/config");
+
+    if (configSub === "set" && configKey) {
+      if (!configVal) fail("Usage: clara config set <key> <value>");
+      // Support dot notation for nested keys (e.g. channels.default)
+      const parts = configKey.split(".");
+      let obj: Record<string, unknown> = {};
+      let cursor = obj;
+      for (let i = 0; i < parts.length - 1; i++) {
+        cursor[parts[i]] = {};
+        cursor = cursor[parts[i]] as Record<string, unknown>;
+      }
+      // Auto-detect booleans and numbers
+      let parsed: unknown = configVal;
+      if (configVal === "true") parsed = true;
+      else if (configVal === "false") parsed = false;
+      else if (/^\d+$/.test(configVal)) parsed = Number(configVal);
+      cursor[parts[parts.length - 1]] = parsed;
+      updateRawConfig(obj);
+      console.log(`${configKey} = ${configVal}`);
+    } else if (configSub === "get" && configKey) {
+      const raw = readRawConfig();
+      const parts = configKey.split(".");
+      let val: unknown = raw;
+      for (const p of parts) {
+        if (val && typeof val === "object") val = (val as Record<string, unknown>)[p];
+        else {
+          val = undefined;
+          break;
+        }
+      }
+      if (val === undefined) {
+        console.log(`${configKey}: (not set)`);
+      } else if (typeof val === "object") {
+        const yaml = (await import("js-yaml")).default;
+        console.log(yaml.dump(val, { lineWidth: -1 }).trim());
+      } else {
+        console.log(`${configKey} = ${val}`);
+      }
+    } else if (!configSub || configSub === "list") {
+      const raw = readRawConfig();
+      const yaml = (await import("js-yaml")).default;
+      console.log(yaml.dump(raw, { lineWidth: -1 }).trim());
+    } else {
+      console.log("Usage: clara config <set|get|list>");
+      console.log("  clara config set <key> <value>  — set a config value");
+      console.log("  clara config get <key>          — get a config value");
+      console.log("  clara config list               — show all config");
+    }
+    break;
+  }
+
+  case "channels": {
+    const sub = process.argv[3];
+    const target = process.argv[4];
+    const { updateRawConfig } = await import("../utils/config");
+    if (sub === "on" || sub === "off") {
+      const enabled = sub === "on";
+      if (target) {
+        const supported = new Set(["telegram", "slack", "phone", "sms", "whatsapp"]);
+        if (!supported.has(target)) fail("Usage: clara channels <on|off> [telegram|slack|phone|sms|whatsapp]");
+        updateRawConfig({ channels: { ...(enabled ? { enabled: true } : {}), [target]: { enabled } } });
+      } else {
+        updateRawConfig({ channels: { enabled } });
+      }
+      const pid = readPid();
+      if (pid && isRunning()) {
+        process.kill(pid, "SIGHUP");
+        console.log(
+          target ? `${target} ${enabled ? "enabled" : "disabled"}` : `channels ${enabled ? "enabled" : "disabled"}`,
+        );
+      } else {
+        console.log(
+          target
+            ? `${target} ${enabled ? "enabled" : "disabled"} — start clara to apply`
+            : `channels ${enabled ? "enabled" : "disabled"} — start clara to apply`,
+        );
+      }
+    } else {
+      console.log(`channels: ${getConfig().channels.enabled ? "on" : "off"}`);
+    }
+    break;
+  }
+
+  case "db": {
+    const { dbCommand } = await import("../commands/db");
+    await dbCommand();
+    break;
+  }
+
+  case "test": {
+    const verbose = process.argv.includes("-v") || process.argv.includes("--verbose");
+    const extraArgs = process.argv.slice(3).filter((a) => a !== "-v" && a !== "--verbose");
+    const proc = Bun.spawn(["bun", "test", ...extraArgs], {
+      stdio: ["ignore", "pipe", "pipe"],
+      cwd: import.meta.dir + "/../..",
+      env: { ...process.env, LOG_LEVEL: "silent" },
+    });
+
+    const [stdout, stderr] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text()]);
+    const exitCode = await proc.exited;
+    const output = stdout + stderr;
+
+    if (verbose) {
+      process.stdout.write(output);
+    } else {
+      for (const line of output.split("\n")) {
+        if (
+          /^\s*\d+ pass/.test(line) ||
+          /^\s*\d+ fail/.test(line) ||
+          /^Ran \d+ tests/.test(line) ||
+          /expect\(\) calls/.test(line)
+        ) {
+          console.log(line);
+        } else if (/^✗|FAIL|error:/i.test(line.trim())) {
+          console.log(line);
+        }
+      }
+    }
+    process.exit(exitCode);
+  }
+
+  case "backup": {
+    const { backupCommand } = await import("../commands/backup");
+    await backupCommand();
+    break;
+  }
+
+  case "validate": {
+    const { validateConfig } = await import("../commands/validate");
+    const result = validateConfig();
+    for (const msg of result.messages) console.log(`  ${msg}`);
+    console.log(result.ok ? "\nConfig is valid." : "\nConfig has errors.");
+    process.exit(result.ok ? 0 : 1);
+  }
+
+  case "update": {
+    const updateGuard = withDefaultWait(parseGuardFlags(process.argv.slice(3)), 1);
+    const { version: currentVersion } = await import("../../package.json");
+    console.log(`Current: v${currentVersion}`);
+
+    // Check active engines before doing anything destructive
+    if (isRunning() && !(await guardActiveEngines("update", updateGuard))) process.exit(1);
+
+    // Auto-backup before update
+    try {
+      const { createBackup } = await import("../commands/backup");
+      console.log("Backing up...");
+      await createBackup(true);
+      console.log("✓ pre-update backup created");
+    } catch (err) {
+      console.log(`⚠ backup skipped: ${errMsg(err)}`);
+    }
+    console.log("Updating...");
+    const install = Bun.spawn(["npm", "i", "-g", "heyclara@latest"], {
+      stdio: ["ignore", "inherit", "inherit"],
+    });
+    const installExit = await install.exited;
+    if (installExit !== 0) {
+      fail("Update failed.");
+    }
+    // Get new version
+    const check = Bun.spawn(["npm", "view", "heyclara", "version"], {
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    const newVersion = (await new Response(check.stdout).text()).trim();
+    await check.exited;
+    if (newVersion === currentVersion) {
+      console.log("Already on latest.");
+    } else {
+      console.log(`Updated: v${currentVersion} → v${newVersion}`);
+      if (isRunning()) {
+        console.log("Restarting daemon...");
+        const { isServiceInstalled, restartService } = await import("../commands/service");
+        if (isServiceInstalled()) {
+          await restartService({ force: updateGuard.force });
+        } else {
+          stopDaemon({ force: updateGuard.force });
+          startDaemon();
+        }
+        console.log("Restarted.");
+      }
+    }
+    break;
+  }
+
+  case "init": {
+    const { runInit } = await import("../commands/init");
+    await runInit();
+    break;
+  }
+
+  case "help":
+  case "--help":
+  case "-h":
+  default: {
+    const HELP = `Usage: clara <command>
+
+Daemon:
+  start                           Start daemon + register service
+  stop [--wait N] [--force]       Stop daemon (guards active engines)
+  restart [--wait N] [--force]    Restart daemon
+  update [--wait N] [--force]     Update to latest version
+  status [--json --rooms N --all] Show daemon, jobs, channels
+  active [--full]                 Show active engine count or details
+  model [name]                    Show or set global Claude model
+  health                          Check daemon, db, channels, config
+  logs [-f] [--channel ch]        Daemon logs (filter by channel)
+
+Chat:
+  chat [-c] [-r] [--employee|--agent|--job name]  Interactive chat
+  run <prompt>                    One-shot execution
+  history [room]                  Recent messages
+  send [-c ch] [--to C --thread T] <msg>  Send message (DM, channel, or thread)
+
+Jobs:
+  job <sub>                       Manage jobs (list|add|update|remove|run|...)
+
+Persona:
+  rules [show|reset]              View or reset rules.md
+  memory [show|reset]             View or reset memory.md
+  agent <sub>                     List/show agents
+  employee <sub>                  Manage employees
+  skills [source]                 List available skills
+
+Channels:
+  channels [on|off] [name]        Toggle all channels or one channel
+  watch <sub>                     Manage Slack watch channels
+  telegram [setup]                Configure telegram
+  slack [setup]                   Configure slack
+
+System:
+  config <set|get|list>           Manage config values
+  backup [list]                   Create or list backups
+  validate                        Validate config.yaml
+  db <sub>                        Database setup/status/migrate
+  init                            Initial setup
+  test [-v]                       Run tests`;
+
+    console.log(HELP);
+    // Unknown command → exit 1, help/no command → exit 0
+    const isHelp = !command || command === "help" || command === "--help" || command === "-h";
+    if (!isHelp) console.error(`\nUnknown command: ${command}`);
+    process.exit(isHelp ? 0 : 1);
   }
 }

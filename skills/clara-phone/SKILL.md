@@ -98,19 +98,19 @@ restart. For a persistent deploy:
 ```bash
 brew install cloudflared
 cloudflared tunnel login                          # opens browser, writes cert.pem
-cloudflared tunnel create clara-mac               # creates the tunnel
-cloudflared tunnel route dns clara-mac clara.example.com   # CNAME on a Cloudflare-managed domain
+cloudflared tunnel create nia-mac                 # creates the tunnel
+cloudflared tunnel route dns nia-mac clara.example.com   # CNAME on a Cloudflare-managed domain
 ```
 
-Keep Clara's tunnel config in Clara's home as a single flat file:
+Keep nia's tunnel config in nia's home as a single flat file:
 `~/.heyclara/cloudflared-config.yaml`. The cloudflared-internal artifacts
 (`cert.pem`, the per-tunnel credentials JSON written by `tunnel create`)
 stay where cloudflared put them — those are cloudflared's territory, not
-Clara's.
+nia's.
 
 ```yaml
 # ~/.heyclara/cloudflared-config.yaml
-tunnel: clara-mac
+tunnel: nia-mac
 credentials-file: /Users/<you>/.cloudflared/<tunnel-id>.json
 
 ingress:
@@ -243,7 +243,7 @@ channel's handler.
 - `src/channels/whatsapp.ts` — WhatsApp channel. Same shape, plus
   `whatsapp:` prefix on Twilio addresses and `lastInboundAt` tracking
   for the 24h customer-service window (outside it, replies are dropped
-  with a log line — Twilio would reject them anyway).
+  with a log entry — Twilio would reject them anyway).
 
 ## Cost model
 
@@ -289,7 +289,7 @@ prefer Telegram voice notes over live calls for long-form things.
    Twilio rejects free-form replies (template-only). The whatsapp channel
    tracks `lastInboundAt` per remote and fails closed with a log line
    instead of sending what Twilio will reject.
-8. **WhatsApp Sandbox opt-in expires after 72h of inactivity.** Clara gets
+8. **WhatsApp Sandbox opt-in expires after 72h of inactivity.** Aman gets
    silently disconnected mid-trip; rejoin by texting the same
    `join <two-words>` code to +1 415 523 8886.
 9. **US-Twilio-long-code → India SMS outbound deliverability is unreliable.**

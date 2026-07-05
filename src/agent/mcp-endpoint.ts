@@ -1,121 +1,102 @@
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
+import { randomBytes, randomUUID } from "crypto";
+import type { NiaTool } from "../mcp/tools/types";
+import type { McpSourceContext } from "../mcp";
+import { log } from "../utils/log";
+
 /**
- * Loopback MCP HTTP endpoint that CLI backends (Codex) connect back to
- * for HeyClara's tools. Runs on a local port, serves the same CLARA_TOOLS
- * table as the in-process server.
- * 
- * Enhanced for web UI: CORS, WebSocket logs, health check.
+ * Loopback MCP endpoint — how out-of-process CLI backends (Codex/Gemini) reach
+ * Clara's tools. The daemon hosts ONE 127.0.0.1 HTTP server; each agent run mints
+ * a bearer token bound to an IMMUTABLE `McpSourceContext` snapshot and gets its
+ * own MCP server instance (so `send_message` routing is frozen per run, exactly
+ * like the in-process per-query closure — no shared mutable routing state, no
+ * cross-run race). Tool handlers run IN the daemon process, keeping their
+ * channel/phone/DB singleton access.
+ *
+ * Round-trip verified end-to-end against real codex 0.142.0 (see the spec).
  */
-import type { ClaraTool } from "../mcp/tools/types";
 
+interface RunEntry {
+  ctx: McpSourceContext;
+  server: McpServer;
+  transport: WebStandardStreamableHTTPServerTransport;
+}
+
+const runs = new Map<string, RunEntry>();
 let server: ReturnType<typeof Bun.serve> | null = null;
-// Use any for Bun's ServerWebSocket which is compatible with standard WebSocket methods
-const wsClients = new Set<any>();
+let port = 0;
+// Injected by the daemon (the composition root) so this module never imports the
+// tool table — which would create a cycle (handlers → runner → agent → here).
+let endpointTools: NiaTool[] = [];
 
-const WEB_ORIGIN = process.env.CLARA_WEB_ORIGIN || "http://localhost:3001";
-
-// Simple logging to avoid circular deps
-function mcpLog(level: string, msg: string, data?: Record<string, unknown>): void {
-  const time = new Date().toISOString();
-  console.log(JSON.stringify({ level, time, msg, ...data }));
-}
-
-function corsHeaders(): HeadersInit {
-  return {
-    "Access-Control-Allow-Origin": WEB_ORIGIN,
-    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type",
-    "Access-Control-Allow-Credentials": "true",
-  };
-}
-
-function broadcastLog(line: string): void {
-  for (const ws of wsClients) {
-    if (ws.readyState === WebSocket.OPEN) {
-      ws.send(line);
-    }
+/** Build a per-run MCP server whose tool closures bake in the frozen context. */
+function buildRunServer(ctx: McpSourceContext, tools: NiaTool[]): McpServer {
+  const mcp = new McpServer({ name: "clara", version: "0.1.0" });
+  for (const t of tools) {
+    mcp.registerTool(t.name, { description: t.description, inputSchema: t.schema }, async (args: unknown) => ({
+      content: [{ type: "text" as const, text: await t.handler(args, ctx) }],
+    }));
   }
+  return mcp;
 }
 
-export function addLogBroadcaster(line: string): void {
-  broadcastLog(line);
-}
-
-export async function startMcpEndpoint(tools: ClaraTool[]): Promise<number> {
-  if (server) return server.port ?? 0;
-
-  const port = process.env.CLARA_MCP_PORT ? parseInt(process.env.CLARA_MCP_PORT, 10) : 0;
-
+/** Start the loopback endpoint (idempotent). The daemon passes `CLARA_TOOLS`. */
+export async function startMcpEndpoint(tools: NiaTool[] = []): Promise<void> {
+  endpointTools = tools;
+  if (server) return;
   server = Bun.serve({
-    port,
-    async fetch(req, server) {
+    hostname: "127.0.0.1",
+    port: 0, // OS-assigned ephemeral port
+    // MCP Streamable-HTTP keeps a long-lived server→client stream open; without
+    // a high idle timeout Bun cuts it (default 10s) mid-job. 255s is Bun's max.
+    idleTimeout: 255,
+    async fetch(req) {
       const url = new URL(req.url);
-
-      // CORS preflight
-      if (req.method === "OPTIONS") {
-        return new Response(null, { status: 204, headers: corsHeaders() });
-      }
-
-      // Health check
-      if (url.pathname === "/health" && req.method === "GET") {
-        return Response.json({ status: "ok", version: "0.5.0", mcpPort: server.port }, { headers: corsHeaders() });
-      }
-
-      // WebSocket for live logs
-      if (url.pathname === "/ws/logs") {
-        const upgraded = server.upgrade(req, { data: {} });
-        if (!upgraded) return new Response("Upgrade failed", { status: 500 });
-        return new Response(null, { status: 101 });
-      }
-
-      // REST endpoints
-      if (url.pathname === "/tools" && req.method === "GET") {
-        const toolDefs = tools.map((t) => ({ name: t.name, description: t.description }));
-        return Response.json(toolDefs, { headers: corsHeaders() });
-      }
-
-      if (url.pathname === "/call" && req.method === "POST") {
-        const body = (await req.json()) as { name: string; args: Record<string, unknown> };
-        const tool = tools.find((t) => t.name === body.name);
-        if (!tool) return new Response(`Unknown tool: ${body.name}`, { status: 404, headers: corsHeaders() });
-        try {
-          const result = await tool.handler(body.args);
-          return Response.json({ result }, { headers: corsHeaders() });
-        } catch (err) {
-          return Response.json({ error: err instanceof Error ? err.message : String(err) }, { status: 500, headers: corsHeaders() });
-        }
-      }
-
-      return new Response("Not found", { status: 404, headers: corsHeaders() });
-    },
-    websocket: {
-      open(ws) {
-        wsClients.add(ws);
-      },
-      close(ws) {
-        wsClients.delete(ws);
-      },
-      message(ws, message) {
-        // Keep alive - client can send ping
-        if (message === "ping") ws.send("pong");
-      },
+      if (url.pathname !== "/mcp") return new Response("not found", { status: 404 });
+      const auth = req.headers.get("authorization") ?? "";
+      const token = auth.startsWith("Bearer ") ? auth.slice(7) : "";
+      const entry = runs.get(token);
+      if (!entry) return new Response("unauthorized", { status: 401 });
+      return entry.transport.handleRequest(req);
     },
   });
-
-  mcpLog("info", "MCP endpoint started", { port: server.port });
-  return server.port ?? 0;
+  port = server.port ?? 0;
+  log.info({ port }, "mcp-endpoint: listening on loopback");
 }
 
 export function stopMcpEndpoint(): void {
-  if (server) {
-    for (const ws of wsClients) ws.close();
-    wsClients.clear();
-    server.stop();
-    server = null;
-    mcpLog("info", "MCP endpoint stopped");
-  }
+  for (const token of [...runs.keys()]) revokeRun(token);
+  server?.stop(true);
+  server = null;
+  port = 0;
 }
 
-export function getMcpEndpointUrl(): string {
-  if (!server) return "";
-  return `http://localhost:${server.port}`;
+/**
+ * Mint a per-run endpoint token bound to a frozen context. Returns the URL +
+ * token to hand to the CLI backend (e.g. `mcp_servers.clara.url` + a bearer env
+ * var). Throws if the endpoint isn't started.
+ */
+export async function mintRun(ctx: McpSourceContext, tools?: NiaTool[]): Promise<{ url: string; token: string }> {
+  if (!server) throw new Error("mcp-endpoint not started");
+  const token = randomBytes(32).toString("base64url");
+  const mcp = buildRunServer(ctx, tools ?? endpointTools);
+  const transport = new WebStandardStreamableHTTPServerTransport({ sessionIdGenerator: () => randomUUID() });
+  await mcp.connect(transport);
+  runs.set(token, { ctx, server: mcp, transport });
+  return { url: `http://127.0.0.1:${port}/mcp`, token };
+}
+
+/** Revoke a run's token and tear down its server/transport. Safe to call twice. */
+export function revokeRun(token: string): void {
+  const entry = runs.get(token);
+  if (!entry) return;
+  runs.delete(token);
+  entry.transport.close().catch(() => {});
+  entry.server.close().catch(() => {});
+}
+
+/** Test/diagnostic: number of live runs. */
+export function liveRunCount(): number {
+  return runs.size;
 }

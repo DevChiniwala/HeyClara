@@ -1,69 +1,96 @@
-import { existsSync, readdirSync, readFileSync } from "fs";
-import { join } from "path";
-import { getPaths } from "../utils/paths";
-import { getConfig } from "../utils/config";
+import { existsSync, readFileSync, readdirSync } from "fs";
+import { join, resolve } from "path";
+import { homedir } from "os";
+import yaml from "js-yaml";
+import { getNiaHome } from "../utils/paths";
+import { log } from "../utils/log";
+import type { AgentInfo } from "../types/agent";
 
-export interface AgentInfo {
-  name: string;
-  body: string;
-  model?: string;
+// heyclara project root (resolved from this file's location)
+const PROJECT_ROOT = resolve(import.meta.dir, "../..");
+
+function getAgentDirs(): { dir: string; source: string }[] {
+  const niaHome = getNiaHome();
+  const dirs: { dir: string; source: string }[] = [
+    { dir: join(process.cwd(), "agents"), source: "cwd" },
+    { dir: join(PROJECT_ROOT, "agents"), source: "project" },
+    { dir: join(niaHome, "agents"), source: "clara" },
+    { dir: join(homedir(), ".shared", "agents"), source: "shared" },
+  ];
+  // Deduplicate paths (cwd, project, and clara may overlap)
+  const seen = new Set<string>();
+  return dirs.filter(({ dir }) => {
+    const resolved = resolve(dir);
+    if (seen.has(resolved)) return false;
+    seen.add(resolved);
+    return true;
+  });
 }
 
 export function scanAgents(): AgentInfo[] {
-  const baseDir = join(getPaths().home, "agents");
-  if (!existsSync(baseDir)) return [];
-
   const agents: AgentInfo[] = [];
-  const entries = readdirSync(baseDir, { withFileTypes: true });
-  for (const entry of entries) {
-    if (!entry.isDirectory()) continue;
-    const agentDir = join(baseDir, entry.name);
-    const agentMd = join(agentDir, "AGENT.md");
-    if (!existsSync(agentMd)) continue;
-    const content = readFileSync(agentMd, "utf8");
-    agents.push({
-      name: entry.name,
-      body: content.trim(),
-      model: extractModel(content),
-    });
-  }
-  return agents;
-}
+  const seen = new Set<string>();
 
-export function getAgentDefinitions(): Record<string, { description: string; prompt: string; model?: string }> {
-  const agents = scanAgents();
-  const defs: Record<string, { description: string; prompt: string; model?: string }> = {};
-  for (const agent of agents) {
-    defs[agent.name] = {
-      description: extractDescription(agent.body) || `Agent specialized in ${agent.name}`,
-      prompt: agent.body,
-      model: agent.model,
-    };
+  for (const { dir, source } of getAgentDirs()) {
+    if (!existsSync(dir)) continue;
+
+    const entries = readdirSync(dir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name));
+    for (const entry of entries) {
+      if (!entry.isDirectory() || entry.name.startsWith(".")) continue;
+
+      const agentFile = join(dir, entry.name, "AGENT.md");
+      if (!existsSync(agentFile)) continue;
+
+      const content = readFileSync(agentFile, "utf8");
+      const fmMatch = content.match(/^---\n([\s\S]*?)\n---/);
+      if (!fmMatch) continue;
+
+      let meta: Record<string, unknown> = {};
+      try {
+        meta = (yaml.load(fmMatch[1]) as Record<string, unknown>) || {};
+      } catch (err) {
+        log.warn({ err, agent: entry.name, path: agentFile }, "failed to parse agent metadata, skipping");
+        continue;
+      }
+      const name = (typeof meta.name === "string" ? meta.name : "") || entry.name;
+
+      const key = name.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+
+      const body = content.replace(/^---\n[\s\S]*?\n---\n*/, "").trim();
+
+      agents.push({
+        name,
+        description: typeof meta.description === "string" ? meta.description : "",
+        body,
+        model: typeof meta.model === "string" ? meta.model : undefined,
+        source,
+      });
+    }
   }
-  return defs;
+
+  return agents;
 }
 
 export function getAgentsSummary(): string {
   const agents = scanAgents();
   if (agents.length === 0) return "";
-  const lines = agents.map((a) => `- **${a.name}**${a.model ? ` (model: ${a.model})` : ""}`);
-  return `## Available Agents\n${lines.join("\n")}`;
+  const lines = agents.map((a) => (a.description ? `- @${a.name}: ${a.description}` : `- @${a.name}`));
+  return `Available agents:\n${lines.join("\n")}`;
 }
 
-function extractModel(content: string): string | undefined {
-  for (const line of content.split("\n")) {
-    const trimmed = line.trim().toLowerCase();
-    if (trimmed.startsWith("model:")) return line.split(":")[1]?.trim() || undefined;
-  }
-  return undefined;
-}
+export function getAgentDefinitions(): Record<string, { description: string; prompt: string; model?: string }> {
+  const agents = scanAgents();
+  const defs: Record<string, { description: string; prompt: string; model?: string }> = {};
 
-function extractDescription(content: string): string {
-  for (const line of content.split("\n")) {
-    const trimmed = line.trim();
-    if (trimmed.startsWith("description:") || trimmed.startsWith("Description:")) {
-      return line.split(":")[1]?.trim() || "";
-    }
+  for (const agent of agents) {
+    defs[agent.name] = {
+      description: agent.description,
+      prompt: agent.body,
+      ...(agent.model ? { model: agent.model } : {}),
+    };
   }
-  return "";
+
+  return defs;
 }

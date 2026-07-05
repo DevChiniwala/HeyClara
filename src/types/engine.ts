@@ -1,52 +1,41 @@
-import type { Attachment } from "./attachment";
-import type { ChannelName } from "./enums";
-
 export interface SendResult {
   result: string;
   costUsd: number;
   turns: number;
-  messageId?: number;
+  /** Optional channel-level signal for transports with richer UI than plain text. */
   signal?: "provider_down";
+  /** DB message ID for delivery status tracking (only set for agent replies) */
+  messageId?: number;
 }
 
-export type StreamCallback = (text: string) => void;
-export type ActivityCallback = (text: string) => void;
+export type StreamCallback = (textSoFar: string) => void;
+export type ActivityCallback = (status: string) => void;
 
 export interface SendCallbacks {
   onStream?: StreamCallback;
   onActivity?: ActivityCallback;
 }
 
-export interface WatchBehavior {
-  channel: string;
-  behavior: string;
+export interface ChatEngine {
+  sessionId: string | null;
+  room: string;
+  send(
+    userMessage: string,
+    callbacks?: SendCallbacks,
+    attachments?: import("./attachment").Attachment[],
+  ): Promise<SendResult>;
+  close(): Promise<void>;
 }
 
 export interface EngineOptions {
   room: string;
   channel: string;
+  /** true = resume latest session, or pass a specific session ID */
   resume: boolean | string;
   mcpServers?: Record<string, unknown>;
   employee?: string;
   agent?: string;
   job?: string;
-  watchBehavior?: WatchBehavior;
-}
-
-export interface ChatEngine {
-  readonly sessionId: string | null;
-  readonly room: string;
-  send(userMessage: string, callbacks?: SendCallbacks, attachments?: Attachment[]): Promise<SendResult>;
-  close(): Promise<void>;
-}
-
-export interface JobResult {
-  job: string;
-  timestamp: string;
-  status: "ok" | "error" | "aborted";
-  result: string;
-  duration_ms: number;
-  session_id?: string;
-  terminal_reason?: string;
-  error?: string;
+  /** Watch channel behavior — injected into system prompt for watch-mode engines. */
+  watchBehavior?: { channel: string; behavior: string };
 }

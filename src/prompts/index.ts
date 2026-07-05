@@ -1,41 +1,75 @@
-import { readFileSync } from "fs";
-import { join } from "path";
-import type { Mode, ChannelName } from "../types/enums";
+import { existsSync, readFileSync } from "fs";
+import { join, resolve } from "path";
+import { getPaths } from "../utils/paths";
+import { getConfig } from "../utils/config";
+import { formatPromptDate, formatPromptDateTime } from "../utils/time";
+import { getRuntimeOsInfo } from "../utils/os";
+import type { Mode } from "../types";
 
-const promptsDir = import.meta.dir;
+const PROMPTS_DIR = resolve(import.meta.dir);
 
 function loadPrompt(name: string): string {
-  try {
-    return readFileSync(join(promptsDir, name), "utf8").trim();
-  } catch {
-    return "";
-  }
+  const filePath = join(PROMPTS_DIR, name);
+  if (!existsSync(filePath)) return "";
+  return readFileSync(filePath, "utf8").trim();
 }
 
-const envPrompt = loadPrompt("environment.md");
-
-const modePrompts: Record<string, string> = {
-  chat: loadPrompt("mode-chat.md"),
-  job: loadPrompt("mode-job.md"),
-};
-
-const channelPrompts: Record<string, string> = {
-  common: loadPrompt("channel-common.md"),
-  slack: loadPrompt("channel-slack.md"),
-  telegram: loadPrompt("channel-telegram.md"),
-};
+function interpolate(template: string, vars: Record<string, string>): string {
+  return template.replace(/\{\{(\w+)\}\}/g, (_, key) => vars[key] ?? "");
+}
 
 export function getEnvironmentPrompt(): string {
-  return envPrompt;
+  const paths = getPaths();
+  const config = getConfig();
+  const now = new Date();
+  const osInfo = getRuntimeOsInfo();
+
+  // Build watch channel summary if Slack is configured with watch channels
+  let slackWatch = "";
+  const watch = config.channels.slack.watch;
+  if (watch) {
+    const entries = Object.entries(watch).map(([name, cfg]) => `  - #${name}: ${cfg.behavior}`);
+    slackWatch = `\nActive watch channels:\n${entries.join("\n")}`;
+  }
+
+  return interpolate(loadPrompt("environment.md"), {
+    configPath: paths.config,
+    dbUrl: config.database_url.replace(/\/\/.*@/, "//***@"),
+    selfDir: paths.selfDir,
+    timezone: config.timezone,
+    currentDate: formatPromptDate(now, config.timezone),
+    currentTime: formatPromptDateTime(now, config.timezone),
+    osName: osInfo.osName,
+    osType: osInfo.osType,
+    osRelease: osInfo.osRelease,
+    osPlatform: osInfo.osPlatform,
+    osArch: osInfo.osArch,
+    shell: osInfo.shell,
+    activeStart: config.activeHours.start,
+    activeEnd: config.activeHours.end,
+    model: config.model,
+    logLevel: config.log_level,
+    slackWatch,
+  });
 }
 
 export function getModePrompt(mode: Mode): string {
-  return modePrompts[mode] || "";
+  const parts: string[] = [];
+  const common = loadPrompt("mode-common.md");
+  if (common) parts.push(common);
+  const specific = loadPrompt(mode === "chat" ? "mode-chat.md" : "mode-job.md");
+  if (specific) parts.push(specific);
+  return parts.join("\n\n");
 }
 
-export function getChannelPrompt(channel: ChannelName | string): string {
-  if (channel === "slack") return [channelPrompts.common, channelPrompts.slack].filter(Boolean).join("\n\n");
-  if (channel === "telegram") return [channelPrompts.common, channelPrompts.telegram].filter(Boolean).join("\n\n");
-  if (channel === "sms" || channel === "whatsapp") return channelPrompts.common;
-  return "";
+export function getChannelPrompt(channel: string): string {
+  const parts: string[] = [];
+  // Load common channel rules for non-terminal channels
+  if (channel !== "terminal") {
+    const common = loadPrompt("channel-common.md");
+    if (common) parts.push(common);
+  }
+  const specific = loadPrompt(`channel-${channel}.md`);
+  if (specific) parts.push(specific);
+  return parts.join("\n\n");
 }

@@ -99,7 +99,7 @@ Wait for confirmation before proceeding.
 Create the optimization directory:
 
 ```
-~/.niahere/optimizations/{slug}-{hex}/
+~/.heyclara/optimizations/{slug}-{hex}/
 ```
 
 Where `{slug}` is a short descriptive name and `{hex}` is 4 random hex chars.
@@ -178,7 +178,7 @@ IMPORTANT:
 
 ## Step 4: Schedule the Job
 
-Use the `add_job` MCP tool (preferred) or `nia job add` CLI:
+Use the `add_job` MCP tool (preferred) or `clara job add` CLI:
 
 - **name**: `optimize-{slug}` (e.g., `optimize-signup-prompt`)
 - **schedule**: ISO timestamp for the agreed time, or now
@@ -196,7 +196,7 @@ Confirm to the user:
 
 When the user asks about results, or when reviewing the notification:
 
-1. Read `~/.niahere/optimizations/{slug}-{hex}/state.md` for the summary
+1. Read `~/.heyclara/optimizations/{slug}-{hex}/state.md` for the summary
 2. Read `results.jsonl` for the experiment log
 3. Show `current-best.md` vs `baseline.md` — the diff is the value
 4. Show the accepted progression if the user wants to see the journey
@@ -219,12 +219,12 @@ Use this for quick 5-10 iteration runs where the user is watching.
 A running job (e.g., news-curator, prompt-generator) can use this pattern to improve
 its own approach. The flow:
 
-1. Job creates an optimization subdirectory in its workspace or in `~/.niahere/optimizations/`
+1. Job creates an optimization subdirectory in its workspace or in `~/.heyclara/optimizations/`
 2. Runs the loop inline (not as a sub-job — within its own execution)
 3. Saves the best version in the workspace
 4. Does NOT auto-apply changes to its own prompt or config
 5. Sends a message: "I found a better approach for [X]. Review at [path]."
-6. The user decides whether to apply it (e.g., via `nia job update`)
+6. The user decides whether to apply it (e.g., via `clara job update`)
 
 ## What NOT to Optimize
 

@@ -1,6 +1,7 @@
+import type { ChatEngine } from "./engine";
+
 export interface ChatState {
-  sessionId: string | null;
-  messageCount: number;
-  lastActivity: number | null;
-  inFlight: boolean;
+  engine: ChatEngine;
+  roomIndex: number;
+  lock: Promise<void>;
 }

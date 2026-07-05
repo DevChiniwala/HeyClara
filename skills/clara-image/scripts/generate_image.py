@@ -19,14 +19,14 @@ from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = SCRIPT_DIR.parent
-NIA_HOME = Path(os.environ.get("NIA_HOME", Path.home() / ".niahere"))
-NIA_CONFIG = NIA_HOME / "config.yaml"
+CLARA_HOME = Path(os.environ.get("CLARA_HOME", Path.home() / ".heyclara"))
+NIA_CONFIG = CLARA_HOME / "config.yaml"
 DEFAULT_MODEL = "gemini-3.1-flash-image-preview"
 PRO_MODEL = "gemini-3-pro-image-preview"
 BASIC_MODEL = "gemini-2.5-flash-image"
-USER_REFERENCE = str(NIA_HOME / "images" / "reference.webp")
-DEFAULT_REFERENCE = str(PROJECT_ROOT / "assets" / "nia-reference.webp")
-DEFAULT_OUTPUT = str(NIA_HOME / "images")
+USER_REFERENCE = str(CLARA_HOME / "images" / "reference.webp")
+DEFAULT_REFERENCE = str(PROJECT_ROOT / "assets" / "clara-reference.webp")
+DEFAULT_OUTPUT = str(CLARA_HOME / "images")
 DEFAULT_PROMPT = (
     "Generate a warm, natural portrait matching the reference image. "
     "Keep the same face and style. Realistic skin, natural lighting, photorealistic."
@@ -55,11 +55,11 @@ def resolve_output_path(output: str | None, mime_type: str) -> Path:
         if out.suffix:
             return out
         return out / f"nia_{time.strftime(TIMESTAMP_FORMAT)}{ext}"
-    return Path(f"/tmp/nia_{time.strftime(TIMESTAMP_FORMAT)}{ext}")
+    return Path(f"/tmp/clara_{time.strftime(TIMESTAMP_FORMAT)}{ext}")
 
 
 def read_config_key() -> str:
-    """Read gemini_api_key from niahere config.yaml."""
+    """Read gemini_api_key from heyclara config.yaml."""
     if not NIA_CONFIG.is_file():
         return ""
     try:
@@ -85,7 +85,7 @@ def resolve_api_key(cli_key: str | None) -> str:
     env_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
     if env_key:
         return env_key
-    # Read from niahere config.yaml
+    # Read from heyclara config.yaml
     return read_config_key()
 
 
@@ -153,7 +153,7 @@ def generate_image(
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Generate Nia image using Gemini image generation."
+        description="Generate clara image using Gemini image generation."
     )
     parser.add_argument(
         "--prompt", default=DEFAULT_PROMPT,
@@ -194,7 +194,7 @@ def main() -> None:
                 f"or add gemini_api_key to {NIA_CONFIG}."
             )
 
-        # Resolve reference image: user's ~/.niahere/images/reference.webp > skill default > none
+        # Resolve reference image: user's ~/.heyclara/images/reference.webp > skill default > none
         ref_path: str | None = None
         if not args.no_reference:
             if args.reference:

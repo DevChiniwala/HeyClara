@@ -1,9 +1,10 @@
-import { closeDb, getSql } from "./connection";
+import { closeDb } from "./connection";
+import { runMigrations } from "./migrate";
 
 export async function withDb<T>(fn: () => Promise<T>): Promise<T> {
+  await runMigrations();
   try {
-    const result = await fn();
-    return result;
+    return await fn();
   } finally {
     await closeDb();
   }

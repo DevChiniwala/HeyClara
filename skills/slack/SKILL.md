@@ -9,7 +9,7 @@ Single entry point, one subcommand per API call. Agents compose these to build a
 
 ## Setup
 
-Credentials: `~/.niahere/config.yaml` → `channels.slack.bot_token`
+Credentials: `~/.heyclara/config.yaml` → `channels.slack.bot_token`
 
 ## Primitives
 

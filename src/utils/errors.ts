@@ -1,5 +1,4 @@
+/** Extract a human-readable message from an unknown error value. */
 export function errMsg(err: unknown): string {
-  if (err instanceof Error) return err.message;
-  if (typeof err === "string") return err;
-  return String(err);
+  return err instanceof Error ? err.message : String(err);
 }

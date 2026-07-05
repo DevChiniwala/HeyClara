@@ -1,89 +1,179 @@
+/**
+ * SMS channel via Twilio.
+ *
+ * Same Twilio number as voice (channels.phone.from_number by default,
+ * overridable via channels.sms.from_number). Inbound webhook →
+ * chat engine → REST reply. Reuses the shared TwilioWebhookServer for
+ * routing, signature validation, dedup, and rate-limiting.
+ *
+ * Use case: cellular-only-no-data reachability — Aman can text Clara from
+ * patchy zones (Ladakh highways, basements, etc.) where Telegram /
+ * WhatsApp / voice over data won't work but SMS over SS7 still does.
+ *
+ * Note: outbound from US Twilio long codes to Indian mobile numbers has
+ * variable deliverability under TRAI scrubbing rules. Test empirically;
+ * if outbound fails, the inbound leg (Aman → Clara) is more reliable.
+ */
+import { getMcpServers } from "../mcp";
+import { runMigrations } from "../db/migrate";
+import type { Channel, ChatState, Outbound, TwilioConfig } from "../types";
 import { getConfig } from "../utils/config";
 import { log } from "../utils/log";
-import type { Channel, OutboundMedia, Recipient } from "../types/channel";
-import { createChatEngine } from "../chat/engine";
-import { getMcpServers } from "../mcp";
-import { registerTwilioHandler, getTwilioServer } from "./twilio/server";
+import { sendMessage as twilioSendMessage } from "./twilio/rest";
+import { getTwilioServer } from "./twilio/server";
+import { chainLock, openChatEngine } from "./common/chat-session";
 
-export function createSmsChannel(): Channel | null {
-  const config = getConfig();
-  const sms = config.channels.sms;
-  const twilio = config.channels.twilio;
-  if (!sms.enabled || !twilio.sid || !twilio.secret) return null;
+const EMPTY_TWIML = '<?xml version="1.0" encoding="UTF-8"?><Response></Response>';
 
-  const fromNumber = sms.from_number || twilio.owner_number;
-  if (!fromNumber) return null;
+class SmsChannel implements Channel {
+  name = "sms" as const;
+  private readonly twilio: TwilioConfig;
+  /** Cached resolved "from" number: sms.from_number || phone.from_number */
+  private readonly fromNumber: string;
+  private readonly chats = new Map<string, ChatState>();
 
-  return {
-    name: "sms",
+  constructor(twilio: TwilioConfig, fromNumber: string) {
+    this.twilio = twilio;
+    this.fromNumber = fromNumber;
+  }
 
-    async start() {
-      registerTwilioHandler({
-        path: "/sms",
-        handle: async (body) => {
-          const from = body.From as string;
-          const text = body.Body as string;
-          if (!from || !text) return new Response("<Response/>", { status: 200, headers: { "Content-Type": "text/xml" } });
+  async start(): Promise<void> {
+    await runMigrations();
 
-          log.info({ from }, "sms received");
+    const server = getTwilioServer();
+    server.configure({
+      port: this.twilio.port,
+      publicBaseUrl: this.twilio.public_base_url,
+      signingToken: this.twilio.auth_token || this.twilio.secret,
+    });
 
-          const room = `sms-${from}`;
-          const engine = await createChatEngine({
-            room,
-            channel: "sms",
-            resume: true,
-            mcpServers: getMcpServers({ channel: "sms", room }),
-          });
+    server.registerHttp("/twilio/sms/incoming", (_req, ctx) => this.handleInbound(ctx.params), {
+      dedupOn: "MessageSid",
+      rateLimitOn: "From",
+    });
+    server.registerHttp("/twilio/sms/status", (_req, ctx) => this.handleStatus(ctx.params), {
+      dedupOn: "MessageSid",
+    });
 
-          const result = await engine.send(text);
-          await engine.close();
+    if (this.twilio.owner_number) server.exemptFromRateLimit(this.twilio.owner_number);
 
-          if (result.result) {
-            await sendSms(from, result.result);
-          }
+    await server.start();
 
-          return new Response("<Response/>", { status: 200, headers: { "Content-Type": "text/xml" } });
-        },
-      });
-
-      await getTwilioServer().start();
-    },
-
-    async stop() {
-      // Server is shared; stop handled by channels/index.ts
-    },
-
-    async send(recipient: Recipient, message: OutboundMedia): Promise<boolean> {
-      return sendSms(recipient.id, message.text || "");
-    },
-
-    isAvailable() {
-      return true;
-    },
-  };
-}
-
-async function sendSms(to: string, text: string): Promise<boolean> {
-  const config = getConfig();
-  const twilio = config.channels.twilio;
-  const fromNumber = config.channels.sms.from_number || twilio.owner_number;
-  if (!twilio.sid || !twilio.secret || !fromNumber) return false;
-
-  try {
-    const resp = await fetch(
-      `https://api.twilio.com/2010-04-01/Accounts/${twilio.sid}/Messages.json`,
+    log.info(
       {
-        method: "POST",
-        headers: {
-          Authorization: `Basic ${Buffer.from(`${twilio.sid}:${twilio.secret}`).toString("base64")}`,
-          "Content-Type": "application/x-www-form-urlencoded",
-        },
-        body: new URLSearchParams({ To: to, From: fromNumber, Body: text }),
+        from: this.fromNumber,
+        owner: this.twilio.owner_number,
+        publicBaseUrl: this.twilio.public_base_url,
       },
+      "sms channel started",
     );
-    return resp.ok;
-  } catch (err) {
-    log.error({ err }, "sms send failed");
-    return false;
+  }
+
+  async stop(): Promise<void> {
+    for (const state of this.chats.values()) state.engine.close();
+    this.chats.clear();
+  }
+
+  /** Outbound — used by send_message MCP tool. SMS is text-only; media is dropped with a warning. */
+  async deliver(out: Outbound): Promise<void> {
+    if (!this.twilio.owner_number) throw new Error("sms: owner_number not set");
+    // SMS has no threading; recipient kind is ignored.
+    if (out.media) {
+      log.warn({ filename: out.media.filename }, "sms: media payload dropped (channel is text-only)");
+    }
+    if (out.text) {
+      await this.sendTo(this.twilio.owner_number, out.text);
+    }
+  }
+
+  // --- Inbound webhook ---
+
+  private async handleInbound(params: Record<string, string>): Promise<Response> {
+    const from = params.From || "";
+    const body = params.Body || "";
+
+    if (!this.isAllowed(from)) {
+      log.warn({ from }, "sms: rejecting non-allowlisted sender");
+      return new Response(EMPTY_TWIML, { status: 200, headers: { "Content-Type": "text/xml" } });
+    }
+
+    const state = await this.getState(from);
+    // Ack the webhook immediately; reply via REST asynchronously to avoid
+    // Twilio's ~15s webhook timeout when the engine takes longer.
+    chainLock(state, async () => {
+      try {
+        const { result } = await state.engine.send(body);
+        const reply = result.trim() || "(no response)";
+        await this.sendTo(from, reply);
+      } catch (err) {
+        log.error({ err, from }, "sms: engine error");
+        await this.sendTo(from, `[error] ${err instanceof Error ? err.message : String(err)}`).catch(() => {});
+      }
+    });
+
+    return new Response(EMPTY_TWIML, { status: 200, headers: { "Content-Type": "text/xml" } });
+  }
+
+  private handleStatus(params: Record<string, string>): Response {
+    log.info(
+      {
+        messageSid: params.MessageSid,
+        status: params.MessageStatus,
+        errorCode: params.ErrorCode,
+        to: params.To,
+      },
+      "sms: delivery status",
+    );
+    return new Response("", { status: 204 });
+  }
+
+  // --- Outbound ---
+
+  private async sendTo(remoteE164: string, body: string): Promise<void> {
+    if (!this.twilio.sid || !this.twilio.secret) {
+      log.warn("sms: twilio sid/secret missing, cannot send");
+      return;
+    }
+    try {
+      const res = await twilioSendMessage({
+        accountSid: this.twilio.sid,
+        authSid: this.twilio.sid,
+        authSecret: this.twilio.secret,
+        to: remoteE164,
+        from: this.fromNumber,
+        body,
+        statusCallbackUrl: this.twilio.public_base_url ? `${this.twilio.public_base_url}/twilio/sms/status` : undefined,
+      });
+      log.info({ to: remoteE164, sid: res.messageSid, status: res.status }, "sms: sent");
+    } catch (err) {
+      log.error({ err, to: remoteE164 }, "sms: send failed");
+    }
+  }
+
+  // --- Helpers ---
+
+  private isAllowed(remoteE164: string): boolean {
+    if (this.twilio.owner_number && remoteE164 === this.twilio.owner_number) return true;
+    return this.twilio.allowlist.includes(remoteE164);
+  }
+
+  private async getState(remoteE164: string): Promise<ChatState> {
+    let state = this.chats.get(remoteE164);
+    if (state) return state;
+    state = await openChatEngine(`sms-${remoteE164}`, () => ({ channel: "sms", mcpServers: getMcpServers() }));
+    this.chats.set(remoteE164, state);
+    return state;
   }
 }
+
+export function createSmsChannel(): SmsChannel | null {
+  const { twilio, sms, phone } = getConfig().channels;
+  if (!sms.enabled) return null;
+  if (!twilio.sid || !twilio.secret) return null;
+  // sms.from_number falls back to phone.from_number (same number for voice + SMS).
+  const fromNumber = sms.from_number ?? phone.from_number;
+  if (!fromNumber) return null;
+  return new SmsChannel(twilio, fromNumber);
+}
+
+export type { SmsChannel };

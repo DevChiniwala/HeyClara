@@ -1,40 +1,26 @@
+import { resolve } from "path";
 import { homedir } from "os";
-import { join } from "path";
+import type { Paths } from "../types";
 
-const CLARA_HOME = join(homedir(), ".clara");
-
-export interface ClaraPaths {
-  home: string;
-  config: string;
-  selfDir: string;
-  jobsDir: string;
-  skillsDir: string;
-  watchesDir: string;
-  imagesDir: string;
-  tmpDir: string;
-  daemonLog: string;
-  pidFile: string;
-  stateFile: string;
-  auditFile: string;
+export function getNiaHome(): string {
+  return process.env.CLARA_HOME || resolve(homedir(), ".heyclara");
 }
 
-export function getPaths(): ClaraPaths {
+export function getPaths(): Paths {
+  const home = getNiaHome();
   return {
-    home: CLARA_HOME,
-    config: join(CLARA_HOME, "config.yaml"),
-    selfDir: join(CLARA_HOME, "self"),
-    jobsDir: join(CLARA_HOME, "jobs"),
-    skillsDir: join(CLARA_HOME, "skills"),
-    watchesDir: join(CLARA_HOME, "watches"),
-    imagesDir: join(CLARA_HOME, "images"),
-    tmpDir: join(CLARA_HOME, "tmp"),
-    daemonLog: join(CLARA_HOME, "tmp", "daemon.log"),
-    pidFile: join(CLARA_HOME, "tmp", "clara.pid"),
-    stateFile: join(CLARA_HOME, "tmp", "cron-state.json"),
-    auditFile: join(CLARA_HOME, "tmp", "cron-audit.jsonl"),
+    home,
+    pid: resolve(home, "tmp/clara.pid"),
+    daemonLog: resolve(home, "tmp/daemon.log"),
+    cronState: resolve(home, "tmp/cron-state.json"),
+    cronAudit: resolve(home, "tmp/cron-audit.jsonl"),
+    config: resolve(home, "config.yaml"),
+    jobsDir: resolve(home, "jobs"),
+    selfDir: resolve(home, "self"),
+    beadsDir: resolve(home, "beads"),
+    skillsDir: resolve(home, "skills"),
+    imagesDir: resolve(home, "images"),
+    watchesDir: resolve(home, "watches"),
+    employeesDir: resolve(home, "employees"),
   };
-}
-
-export function getClaraHome(): string {
-  return CLARA_HOME;
 }

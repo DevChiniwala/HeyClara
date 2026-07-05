@@ -1,34 +1,33 @@
-import { getConfig } from "./config";
+const PROMPT_DATE_LOCALE = "en-US";
 
-export function localTime(date: Date): string {
-  const config = getConfig();
-  const tz = config.timezone || "UTC";
-  return date.toLocaleString("en-US", {
-    timeZone: tz,
-    month: "short",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  });
+export function localTime(date: Date = new Date(), timezone?: string): string {
+  return date.toLocaleString(undefined, timezone ? { timeZone: timezone } : undefined);
 }
 
-export function localDate(date: Date): string {
-  const config = getConfig();
-  const tz = config.timezone || "UTC";
-  return date.toLocaleDateString("en-US", {
-    timeZone: tz,
+export function formatPromptDate(date: Date = new Date(), timezone?: string): string {
+  const formatted = new Intl.DateTimeFormat(PROMPT_DATE_LOCALE, {
+    weekday: "long",
     year: "numeric",
-    month: "short",
-    day: "2-digit",
-  });
+    month: "long",
+    day: "numeric",
+    ...(timezone ? { timeZone: timezone } : {}),
+  }).format(date);
+
+  return timezone ? `${formatted} (${timezone})` : formatted;
 }
 
-export function formatDuration(ms: number): string {
-  if (ms < 1000) return `${ms}ms`;
-  if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`;
-  if (ms < 3_600_000) return `${Math.round(ms / 60_000)}m ${Math.round((ms % 60_000) / 1000)}s`;
-  const h = Math.floor(ms / 3_600_000);
-  const m = Math.round((ms % 3_600_000) / 60_000);
-  return `${h}h ${m}m`;
+export function formatPromptDateTime(date: Date = new Date(), timezone?: string): string {
+  const formatted = new Intl.DateTimeFormat(PROMPT_DATE_LOCALE, {
+    weekday: "long",
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    second: "2-digit",
+    timeZoneName: "short",
+    ...(timezone ? { timeZone: timezone } : {}),
+  }).format(date);
+
+  return timezone ? `${formatted} (${timezone})` : formatted;
 }

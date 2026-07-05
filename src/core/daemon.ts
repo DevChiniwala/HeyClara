@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync, closeSync, openSync } from "fs";
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, writeFileSync } from "fs";
 import { dirname, resolve as pathResolve } from "path";
 import { fileURLToPath } from "url";
 import { getPaths } from "../utils/paths";
@@ -9,10 +9,10 @@ import { ActiveEngine, Job } from "../db/models";
 import { runMigrations } from "../db/migrate";
 import { closeDb, getSql } from "../db/connection";
 import { registerAllChannels, startChannels, stopChannels, getStarted, getConfiguredChannelNames } from "../channels";
-import type { Channel } from "../types/channel";
+import type { Channel } from "../types";
 import { startScheduler, stopScheduler, recomputeAllNextRuns } from "./scheduler";
 import { startAlive, stopAlive } from "./alive";
-import { createClaraMcpServer } from "../mcp/server";
+import { createNiaMcpServer } from "../mcp/server";
 import { setMcpFactory } from "../mcp";
 import { startMcpEndpoint, stopMcpEndpoint } from "../agent/mcp-endpoint";
 import { CLARA_TOOLS } from "../mcp/tools/table";
@@ -27,9 +27,12 @@ export function startDaemon(): number {
   mkdirSync(dirname(daemonLog), { recursive: true });
   const logFd = openSync(daemonLog, "a");
 
+  // Use the same executable and script that invoked us
   const execPath = process.execPath;
   const scriptPath = process.argv[1];
 
+  // Strip Claude Code env vars so the daemon (and any SDK subprocesses it
+  // spawns) don't think they're running inside a nested Claude Code session.
   const cleanEnv = { ...process.env };
   delete cleanEnv.CLAUDECODE;
   delete cleanEnv.CLAUDE_CODE_ENTRYPOINT;
@@ -38,11 +41,10 @@ export function startDaemon(): number {
   const proc = Bun.spawn([execPath, scriptPath, "run"], {
     stdio: ["ignore", logFd, logFd],
     env: cleanEnv,
-    detached: true,
   });
 
   proc.unref();
-  closeSync(logFd);
+  closeSync(logFd); // Child owns the fd now; close parent's copy to prevent leak
   const pid = proc.pid;
   writePid(pid);
   return pid;
@@ -55,24 +57,38 @@ export function stopDaemon(opts: { force?: boolean } = {}): boolean {
   }
   removePid();
 
+  // Kill all daemon processes — pidfile PID plus any orphans.
   const killed = killAllDaemons(pidfilePid);
   if (killed === 0 && pidfilePid === null) {
     if (opts.force) clearForceShutdownRequest();
     return false;
   }
 
+  // Wait for processes to finish (up to 5 min for active engines, then SIGKILL)
   waitForExit(opts.force ? 30_000 : 310_000);
   if (opts.force) clearForceShutdownRequest();
   return true;
 }
 
+/** Poll until no daemon processes remain. Escalate to SIGKILL after timeout. */
 function waitForExit(timeoutMs: number): void {
   const deadline = Date.now() + timeoutMs;
+
   while (Date.now() < deadline) {
-    if (findDaemonPids().length === 0) return;
+    const alive = findDaemonPids();
+    if (alive.length === 0) return;
     Bun.sleepSync(100);
   }
-  for (const pid of findDaemonPids()) killDaemon(pid);
+
+  // Still alive — escalate to SIGKILL
+  const remaining = findDaemonPids();
+  for (const pid of remaining) {
+    try {
+      process.kill(pid, "SIGKILL");
+    } catch {}
+  }
+
+  // Brief wait for SIGKILL to take effect
   const killDeadline = Date.now() + 2_000;
   while (Date.now() < killDeadline) {
     if (findDaemonPids().length === 0) return;
@@ -80,32 +96,46 @@ function waitForExit(timeoutMs: number): void {
   }
 }
 
+/** Return PIDs of running daemon processes (excluding ourselves). */
 export function findDaemonPids(): number[] {
-  const pid = readPid();
-  if (pid === null || pid === process.pid) return [];
   try {
-    process.kill(pid, 0);
-    return [pid];
+    const result = Bun.spawnSync(["pgrep", "-f", "src/cli/index\\.ts run$"]);
+    const stdout = new TextDecoder().decode(result.stdout).trim();
+    if (!stdout) return [];
+    return stdout
+      .split("\n")
+      .map((l) => parseInt(l, 10))
+      .filter((pid) => !isNaN(pid) && pid !== process.pid);
   } catch {
     return [];
   }
 }
 
-function killDaemon(pid: number): void {
-  try { process.kill(pid); } catch {
-    try { Bun.spawnSync(["taskkill", "/F", "/PID", String(pid)]); } catch {}
-  }
-}
-
+/** SIGTERM all running daemon processes (pidfile PID + any found via pgrep). */
 function killAllDaemons(knownPid?: number | null): number {
   const toKill = new Set<number>(findDaemonPids());
   if (knownPid && knownPid !== process.pid) toKill.add(knownPid);
-  for (const pid of toKill) killDaemon(pid);
+
+  for (const pid of toKill) {
+    try {
+      process.kill(pid, "SIGTERM");
+    } catch {}
+  }
   return toKill.size;
 }
 
+// ---------------------------------------------------------------------------
+// System jobs — auto-installed on daemon startup
+// ---------------------------------------------------------------------------
+
+/**
+ * Ensure system jobs exist. Uses create-if-not-exists semantics so user
+ * customizations (via `clara job update/disable`) are preserved across restarts.
+ * Currently manages: memory-promoter.
+ */
 async function bootstrapSystemJobs(): Promise<void> {
   const here = dirname(fileURLToPath(import.meta.url));
+
   const systemJobs = [
     {
       name: "memory-promoter",
@@ -120,40 +150,51 @@ async function bootstrapSystemJobs(): Promise<void> {
   for (const j of systemJobs) {
     const existing = await Job.get(j.name);
     if (existing) continue;
+
     if (!existsSync(j.promptPath)) {
       log.warn({ job: j.name, promptPath: j.promptPath }, "system job prompt missing, skipping bootstrap");
       continue;
     }
+
     const prompt = readFileSync(j.promptPath, "utf8");
     await Job.create(j.name, j.schedule, prompt, j.always, j.scheduleType, undefined, undefined, j.stateless);
-    log.info({ job: j.name }, "bootstrapped system job");
+    log.info({ job: j.name, schedule: j.schedule }, "bootstrapped system job");
   }
 }
 
 export async function runDaemon(): Promise<void> {
+  // Ensure we never pass nested-session env vars to SDK subprocesses,
+  // regardless of how the daemon was launched (nia start, clara run, etc.)
   delete process.env.CLAUDECODE;
   delete process.env.CLAUDE_CODE_ENTRYPOINT;
   delete process.env.CLAUDE_AGENT_SDK_VERSION;
 
+  // Startup guard: if another clara daemon is alive, exit immediately.
+  // Use pgrep (via findDaemonPids) instead of kill(pid,0) to verify the
+  // PID is actually a clara process — not a recycled OS PID from something else.
   const existingPid = readPid();
   if (existingPid !== null && existingPid !== process.pid) {
-    const alive = findDaemonPids();
-    if (alive.includes(existingPid)) {
-      log.debug({ existingPid, myPid: process.pid }, "another daemon already running, exiting");
+    const aliveDaemons = findDaemonPids();
+    if (aliveDaemons.includes(existingPid)) {
+      log.debug({ existingPid, myPid: process.pid }, "another daemon is already running, exiting");
       process.exit(0);
     }
+    // PID in file is stale (dead or recycled by OS) — safe to take over
     log.warn({ stalePid: existingPid }, "taking over from stale pid");
     removePid();
   }
 
+  // Crash handlers — ensure PID cleanup and logging on unhandled errors.
+  // Without these, an unhandled rejection kills the process silently,
+  // leaving a stale PID file that blocks restarts and hides the cause.
   process.on("uncaughtException", (err) => {
-    log.fatal({ err }, "uncaught exception");
+    log.fatal({ err }, "uncaught exception — cleaning up");
     removePid();
     process.exit(1);
   });
   process.on("unhandledRejection", (reason) => {
     const err = reason instanceof Error ? reason : new Error(String(reason));
-    log.fatal({ err }, "unhandled rejection");
+    log.fatal({ err }, "unhandled rejection — cleaning up");
     removePid();
     process.exit(1);
   });
@@ -161,24 +202,63 @@ export async function runDaemon(): Promise<void> {
   writePid(process.pid);
   log.info({ pid: process.pid }, "daemon started");
 
-  try { mkdirSync(getPaths().watchesDir, { recursive: true }); } catch {}
-  try { mkdirSync(getPaths().selfDir, { recursive: true }); } catch {}
+  // Check for updates (non-blocking, logged only)
+  try {
+    const { checkForUpdate } = await import("../utils/update");
+    const { version } = await import("../../package.json");
+    const update = await checkForUpdate(version);
+    if (update) {
+      log.warn(
+        { current: update.current, latest: update.latest },
+        "update available — run `npm i -g heyclara` to update",
+      );
+    }
+  } catch {}
 
+  // Ensure watches dir exists — used for file-backed watch behaviors and
+  // per-watch working memory. Safe to call on every startup.
+  try {
+    mkdirSync(getPaths().watchesDir, { recursive: true });
+  } catch (err) {
+    log.warn({ err }, "failed to ensure watches dir");
+  }
+
+  // Ensure staging.md exists — used by the memory consolidator to stage
+  // candidate memories before the nightly promoter reviews them. Existing
+  // installs that pre-date two-stage memory get a seed file on next start.
+  try {
+    const stagingPath = `${getPaths().selfDir}/staging.md`;
+    if (!existsSync(stagingPath)) {
+      const here = dirname(fileURLToPath(import.meta.url));
+      const seed = pathResolve(here, "../../defaults/self/staging.md");
+      if (existsSync(seed)) {
+        mkdirSync(getPaths().selfDir, { recursive: true });
+        writeFileSync(stagingPath, readFileSync(seed, "utf8"));
+        log.info({ stagingPath }, "seeded staging.md from defaults");
+      }
+    }
+  } catch (err) {
+    log.warn({ err }, "failed to ensure staging.md");
+  }
+
+  // Startup recovery
   try {
     await runMigrations();
     await ActiveEngine.clearAll();
-    log.info("cleared stale active engines");
+    log.info("cleared stale active engines from previous run");
   } catch (err) {
-    log.warn({ err }, "startup recovery: postgres unavailable");
+    log.warn({ err }, "startup recovery: postgres unavailable, skipping");
   }
 
+  // Seed system jobs (create-if-not-exists). Currently: memory-promoter.
+  // Users can disable or customize these via `clara job disable/update`.
   try {
     await bootstrapSystemJobs();
   } catch (err) {
     log.warn({ err }, "failed to bootstrap system jobs");
   }
 
-  // Clear stale running states
+  // Clear stale "running" job states
   const { readState, writeState } = await import("../utils/logger");
   const state = readState();
   let recovered = 0;
@@ -188,64 +268,117 @@ export async function runDaemon(): Promise<void> {
       recovered++;
     }
   }
-  if (recovered > 0) { writeState(state); log.info({ recovered }, "recovered stale running jobs"); }
+  if (recovered > 0) {
+    writeState(state);
+    log.info({ recovered }, "recovered stale running jobs");
+  }
 
-  setMcpFactory((ctx) => ({ clara: createClaraMcpServer(ctx as Record<string, unknown> | undefined) }));
+  // Initialize MCP server factory (each query gets its own Protocol instance)
+  setMcpFactory((ctx) => ({ nia: createNiaMcpServer(ctx) }));
   log.info("MCP server factory initialized");
 
+  // Start the loopback MCP endpoint that out-of-process CLI backends (Codex/
+  // Gemini) connect back to for Clara's tools. Tools are injected here (the
+  // composition root) so the endpoint module stays free of the handler chain.
   await startMcpEndpoint(CLARA_TOOLS);
 
+  // Register and start channels
   registerAllChannels();
   let channels: Channel[] = [];
   const config = getConfig();
   if (config.channels.enabled) {
     const result = await startChannels();
     channels = result.started;
+  } else {
+    log.info("channels disabled (channels_enabled: false)");
   }
 
-  try { await recomputeAllNextRuns(); } catch (err) { log.warn({ err }, "failed to recompute next runs"); }
+  // Recompute next_run_at for jobs that don't have one (legacy cron jobs)
+  try {
+    await recomputeAllNextRuns();
+  } catch (err) {
+    log.warn({ err }, "failed to recompute next_run_at");
+  }
 
+  // Start unified scheduler (replaces node-cron)
   startScheduler();
+
+  // Start alive monitor (DB heartbeat + recovery)
   startAlive();
 
+  // Listen for job changes via Postgres LISTEN/NOTIFY
   try {
     const sql = getSql();
-    await sql.listen("clara_jobs", async () => {
+    await sql.listen("nia_jobs", async () => {
       log.info("job change detected via NOTIFY, recomputing next runs");
-      await recomputeAllNextRuns().catch((err) => log.warn({ err }, "recompute failed on notify"));
+      await recomputeAllNextRuns().catch((err) => {
+        log.warn({ err }, "failed to recompute next runs on notify");
+      });
     });
+    log.info("listening for job changes on nia_jobs channel");
   } catch (err) {
-    log.warn({ err }, "could not subscribe to clara_jobs");
+    log.warn({ err }, "could not subscribe to nia_jobs, falling back to SIGHUP only");
   }
 
+  // Listen for session finalization requests from CLI processes
   try {
     const sql = getSql();
-    await sql.listen("clara_finalize", async () => {
-      log.info("finalization request received via NOTIFY");
-      await processPending().catch((err) => log.warn({ err }, "finalize failed on notify"));
+    await sql.listen("nia_finalize", async () => {
+      log.info("finalization request received via NOTIFY, processing pending");
+      await processPending().catch((err) => {
+        log.warn({ err }, "failed to process pending finalizations on notify");
+      });
     });
+    log.info("listening for finalization requests on nia_finalize channel");
   } catch (err) {
-    log.warn({ err }, "could not subscribe to clara_finalize");
+    log.warn({ err }, "could not subscribe to nia_finalize");
   }
 
-  processPending().catch((err) => log.warn({ err }, "startup: failed to drain pending finalizations"));
+  // Drain any finalization requests that arrived while daemon was down
+  processPending().catch((err) => {
+    log.warn({ err }, "startup: failed to drain pending finalizations");
+  });
 
-  setInterval(() => {
-    cleanupOldRequests().catch((err) => log.warn({ err }, "cleanup failed"));
-  }, 24 * 60 * 60 * 1000);
+  // Clean up old finalization requests every 24h
+  setInterval(
+    () => {
+      cleanupOldRequests().catch((err) => {
+        log.warn({ err }, "failed to cleanup old finalization requests");
+      });
+    },
+    24 * 60 * 60 * 1000,
+  );
 
+  // SIGHUP: reload config, reconcile channels, recompute jobs
   process.on("SIGHUP", async () => {
     log.info("received SIGHUP, reloading config");
     resetConfig();
+
     const running = getStarted();
     const wantedNames = getConfiguredChannelNames();
-    if (wantedNames.length > 0 && running.length === 0) {
+    const runningNames = running.map((channel) => channel.name).sort();
+    const wantChannels = wantedNames.length > 0;
+    const haveChannels = running.length > 0;
+    const needsReconcile =
+      wantChannels &&
+      haveChannels &&
+      (wantedNames.length !== runningNames.length || wantedNames.sort().some((name, i) => name !== runningNames[i]));
+
+    if (wantChannels && !haveChannels) {
+      log.info("SIGHUP: starting channels");
       const result = await startChannels();
       channels = result.started;
-    } else if (wantedNames.length === 0 && running.length > 0) {
+    } else if (!wantChannels && haveChannels) {
+      log.info("SIGHUP: stopping channels");
       await stopChannels(running);
       channels = [];
+    } else if (needsReconcile) {
+      log.info({ wantedNames, runningNames }, "SIGHUP: reconciling channels");
+      await stopChannels(running);
+      const result = await startChannels();
+      channels = result.started;
     }
+
     await recomputeAllNextRuns().catch(() => {});
   });
 
@@ -255,6 +388,7 @@ export async function runDaemon(): Promise<void> {
     if (shuttingDown) return;
     shuttingDown = true;
     const force = consumeForceShutdownRequest(process.pid);
+
     log.info({ force }, "shutting down...");
 
     stopAlive();
@@ -263,20 +397,30 @@ export async function runDaemon(): Promise<void> {
     await stopChannels(channels);
 
     try {
-      if (force) closeAllActiveHandles("force shutdown");
+      if (force) {
+        const closed = await closeAllActiveHandles("force shutdown");
+        log.warn({ closed }, "force closed active engines");
+      }
       const engines = await ActiveEngine.list();
       if (engines.length > 0 && !force) {
         log.info({ count: engines.length }, "waiting for active engines to finish");
         const deadline = Date.now() + 300_000;
         while (Date.now() < deadline) {
-          if ((await ActiveEngine.list()).length === 0) break;
+          const remaining = await ActiveEngine.list();
+          if (remaining.length === 0) break;
           await new Promise((r) => setTimeout(r, 1000));
         }
       }
-      await ActiveEngine.clearAll();
-    } catch {}
+      if (engines.length > 0 || force) await ActiveEngine.clearAll();
+    } catch {
+      // postgres may be gone
+    }
 
-    try { await closeDb(); } catch {}
+    try {
+      await closeDb();
+    } catch {
+      // ignore
+    }
 
     removePid();
     log.info("shutdown complete");

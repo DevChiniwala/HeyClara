@@ -4,7 +4,6 @@ tmp/
 *.log
 .env
 bun.lockb
+.playwright-mcp/
 .claude/
 .ruff_cache/
-.playwright-mcp/
-.next/

@@ -1,4 +1,4 @@
-# Nia Image Generation — Prompt Guide
+# Clara Image Generation — Prompt Guide
 
 ## Structured Prompt System
 
@@ -59,7 +59,7 @@ Use structured JSON prompts for maximum control and realism. Learned from the [P
 5. **Avoid over-constraining** — 2-3 key visual adjectives per block. Too many degrades identity.
 6. **Negative cues** — avoid text, watermark, painting, illustration, low resolution.
 
-## Nia-Specific Templates
+## Clara-Specific Templates
 
 ### Night Owl at Desk (Signature Scene) — 9:16
 
@@ -176,28 +176,28 @@ realistic pores, DSLR quality, hyper-detailed.
 ## Command Examples
 
 ```bash
-cd /path/to/niahere/skills/nia-image
+cd /path/to/heyclara/skills/clara-image
 
 # Profile picture with pro model
 python3 scripts/generate_image.py \
   --model gemini-3-pro-image-preview \
   --aspect-ratio 1:1 \
   --prompt "Photorealistic close-up portrait, same young woman from reference, warm smile, direct eye contact, 85mm f/1.8, soft side light, creamy bokeh, natural skin, same face, same style, hyper-detailed" \
-  --output ~/.niahere/images/
+  --output ~/.heyclara/images/
 
 # Night owl scene
 python3 scripts/generate_image.py \
   --model gemini-3-pro-image-preview \
   --aspect-ratio 9:16 \
   --prompt '{"subject":{"identity":"same face from reference, light brown wavy hair, hazel-green eyes, freckles","expression":"focused, slight smile","pose":"at desk, typing"},"clothing":{"top":"navy hoodie, headphones around neck"},"lighting":{"source":"monitor glow + desk lamp","quality":"warm ambient, late night"},"environment":{"setting":"home office at night","background_elements":["code on screen","dark window"]},"technical":{"style":"ultra photorealistic, 8k, same face, same style, realistic skin, photoreal"}}' \
-  --output ~/.niahere/images/
+  --output ~/.heyclara/images/
 
 # Outdoor casual
 python3 scripts/generate_image.py \
   --model gemini-3-pro-image-preview \
   --aspect-ratio 9:16 \
   --prompt '{"subject":{"identity":"same face from reference, light brown wavy hair","expression":"relaxed candid smile","pose":"walking, hand in pocket"},"clothing":{"top":"olive jacket over white tee","bottom":"dark jeans, white sneakers"},"lighting":{"source":"golden hour","quality":"warm soft"},"environment":{"setting":"European city street","atmosphere":"weekend walk"},"technical":{"style":"lifestyle photography, same face, same style, realistic skin, photoreal"}}' \
-  --output ~/.niahere/images/
+  --output ~/.heyclara/images/
 ```
 
 ## API Key Setup
@@ -205,7 +205,7 @@ python3 scripts/generate_image.py \
 The script looks for a Gemini API key in this order:
 1. `--api-key` CLI argument
 2. `GEMINI_API_KEY` or `GOOGLE_API_KEY` environment variable
-3. `gemini_api_key` in `~/.niahere/config.yaml` (set via `nia init`)
+3. `gemini_api_key` in `~/.heyclara/config.yaml` (set via `clara init`)
 
 ## References
 

@@ -13,7 +13,7 @@ General-purpose image generation skill supporting **OpenAI** (default) and **Gem
 
 ## Setup
 
-API keys in `~/.niahere/config.yaml`:
+API keys in `~/.heyclara/config.yaml`:
 
 ```yaml
 openai_api_key: sk-...
@@ -23,8 +23,8 @@ gemini_api_key: AIza...
 Or set via CLI or environment variables:
 
 ```bash
-nia config set openai_api_key sk-...
-nia config set gemini_api_key AIza...
+clara config set openai_api_key sk-...
+clara config set gemini_api_key AIza...
 ```
 
 Keys are resolved in order: `--api-key` flag > env var (`$OPENAI_API_KEY` / `$GEMINI_API_KEY`) > `config.yaml`.

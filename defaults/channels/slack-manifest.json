@@ -2,8 +2,8 @@
   "display_information": {
     "name": "Clara",
     "description": "The coworker who never logs off",
-    "background_color": "#f97316",
-    "long_description": "Clara is a personal AI teammate that runs as a background daemon. She handles scheduled jobs, chats across Telegram and Slack, manages your tasks, and watches your systems — so you can focus on the work that matters. She's geeky, direct, and quietly competent. Think of her as the coworker who's already looked into the issue before you mention it.\n\nBuilt by Dev Chiniwala — https://github.com/DevChiniwala/HeyClara"
+    "background_color": "#8B5A1B",
+    "long_description": "Clara is a personal AI teammate that runs as a background daemon. She handles scheduled jobs, chats across Telegram and Slack, manages your tasks, and watches your systems — so you can focus on the work that matters. She's geeky, direct, and quietly competent. Think of her as the coworker who's already looked into the issue before you mention it.\n\nBuilt by Aman (amankumar.ai) — https://github.com/onlyoneaman/heyclara"
   },
   "features": {
     "bot_user": {

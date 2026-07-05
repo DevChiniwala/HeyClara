@@ -1,13 +1,16 @@
 import type { z } from "zod";
+import type { McpSourceContext } from "../index";
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type HandlerArgs = any;
-
-export interface ClaraTool {
+/**
+ * Shape of one Clara tool. Kept in a leaf module (no handler imports) so both the
+ * tool table and the loopback MCP endpoint can reference the type without
+ * pulling the handler → scheduler → runner → agent chain into a cycle.
+ */
+export interface NiaTool {
   name: string;
   description: string;
-  schema: Record<string, z.ZodTypeAny>;
-  handler: (args: HandlerArgs, ctx?: Record<string, unknown>) => Promise<string> | string;
+  /** A zod raw shape (the object of field schemas), as the SDK `tool()` expects. */
+  schema: z.ZodRawShape;
+  /** Returns the user-facing text result. `ctx` is the frozen per-run routing identity. */
+  handler: (args: any, ctx?: McpSourceContext) => Promise<string> | string;
 }
-
-

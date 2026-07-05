@@ -1,107 +1,208 @@
-import { spawn } from "child_process";
-import { createInterface } from "readline";
+import { existsSync, readdirSync } from "fs";
+import { homedir } from "os";
+import { join, dirname } from "path";
 import type { AgentBackend, AgentSession, AgentSessionContext, AgentEvent } from "../types";
 import type { Attachment } from "../../types/attachment";
-import { getConfig } from "../../utils/config";
-import { log } from "../../utils/log";
+import type { McpSourceContext } from "../../mcp";
+import { CodexNormalizer } from "./codex-normalize";
+import { mintRun, revokeRun } from "../mcp-endpoint";
 
-const CODEX_BIN = process.env.CODEX_BIN || "codex";
+/**
+ * Resolve the codex binary's absolute path. The daemon runs under launchd with a
+ * minimal PATH (`/usr/bin:/bin:...`) that excludes nvm/homebrew bins, so a bare
+ * `codex` spawn would fail. Search the likely install locations (env override,
+ * the runtime's own bin, homebrew, every nvm node bin, bun) and fall back to
+ * PATH only as a last resort. Cached after first resolution.
+ */
+let cachedCodexBin: string | null = null;
+export function resolveCodexBin(): string {
+  if (cachedCodexBin) return cachedCodexBin;
+  const candidates: string[] = [];
+  if (process.env.CODEX_PATH) candidates.push(process.env.CODEX_PATH);
+  candidates.push(join(dirname(process.execPath), "codex")); // sibling of bun/node
+  candidates.push("/opt/homebrew/bin/codex", "/usr/local/bin/codex");
+  try {
+    const nvm = join(homedir(), ".nvm", "versions", "node");
+    for (const v of readdirSync(nvm)) candidates.push(join(nvm, v, "bin", "codex"));
+  } catch {
+    /* no nvm */
+  }
+  candidates.push(join(homedir(), ".bun", "bin", "codex"));
+  cachedCodexBin = candidates.find((p) => existsSync(p)) ?? "codex";
+  return cachedCodexBin;
+}
+
+/** Minimal spawned-process surface, injectable so the session is unit-testable. */
+export interface CliProc {
+  stdout: ReadableStream<Uint8Array>;
+  stderr: ReadableStream<Uint8Array>;
+  exited: Promise<number>;
+  kill(): void;
+}
+export type SpawnFn = (args: string[], opts: { cwd: string; env: Record<string, string> }) => CliProc;
+
+// Clara secrets that must never reach a third-party agent subprocess. Codex
+// authenticates via its own ~/.codex login, not these.
+const SCRUB = new Set([
+  "ANTHROPIC_API_KEY",
+  "SLACK_BOT_TOKEN",
+  "SLACK_APP_TOKEN",
+  "TELEGRAM_BOT_TOKEN",
+  "TWILIO_AUTH_TOKEN",
+  "DATABASE_URL",
+]);
+
+function scrubbedEnv(extra: Record<string, string>): Record<string, string> {
+  const env: Record<string, string> = {};
+  for (const [k, v] of Object.entries(process.env)) {
+    if (!SCRUB.has(k) && v != null) env[k] = v;
+  }
+  return { ...env, ...extra };
+}
+
+function defaultSpawn(args: string[], opts: { cwd: string; env: Record<string, string> }): CliProc {
+  const proc = Bun.spawn([resolveCodexBin(), ...args], {
+    cwd: opts.cwd,
+    env: opts.env,
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  return {
+    stdout: proc.stdout as ReadableStream<Uint8Array>,
+    stderr: proc.stderr as ReadableStream<Uint8Array>,
+    exited: proc.exited,
+    kill: () => proc.kill(),
+  };
+}
+
+async function* readLines(stream: ReadableStream<Uint8Array>): AsyncGenerator<string> {
+  const reader = stream.getReader();
+  const decoder = new TextDecoder();
+  let buf = "";
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buf += decoder.decode(value, { stream: true });
+    let idx: number;
+    while ((idx = buf.indexOf("\n")) >= 0) {
+      yield buf.slice(0, idx);
+      buf = buf.slice(idx + 1);
+    }
+  }
+  if (buf.trim()) yield buf;
+}
+
+async function readAll(stream: ReadableStream<Uint8Array>): Promise<string> {
+  let out = "";
+  const decoder = new TextDecoder();
+  const reader = stream.getReader();
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    out += decoder.decode(value, { stream: true });
+  }
+  return out;
+}
 
 export class CodexBackend implements AgentBackend {
   readonly name = "codex" as const;
+  private spawnFn: SpawnFn;
 
-  async openSession(ctx: AgentSessionContext): Promise<AgentSession> {
-    const config = getConfig();
-    let sessionId: string | null = null;
-    let proc: ReturnType<typeof spawn> | null = null;
-    let aborted = false;
-    let abortReason: string | null = null;
-
-    return {
-      get backendSessionId() {
-        return sessionId;
-      },
-
-      async *send(text: string, _attachments?: Attachment[]) {
-        if (aborted) throw new Error(abortReason || "aborted");
-
-        const args = [
-          "--model", ctx.model || config.model,
-          "--systemPrompt", ctx.systemPrompt,
-          "--prompt", text,
-          "--cwd", ctx.cwd,
-          "--nonInteractive",
-        ];
-
-        if (ctx.resume && typeof ctx.resume === "string") {
-          args.push("--resume", ctx.resume);
-        }
-
-        proc = spawn(CODEX_BIN, args, {
-          stdio: ["pipe", "pipe", "pipe"],
-          env: { ...process.env, CLAUDE_CODE_ENTRYPOINT: undefined },
-        });
-
-        const reader = createInterface({ input: proc.stdout as NodeJS.ReadableStream, crlfDelay: Infinity });
-        let sawResult = false;
-
-        try {
-          for await (const line of reader) {
-            if (aborted) throw new Error(abortReason || "aborted");
-            const trimmed = line.trim();
-            if (!trimmed) continue;
-
-            let parsed: unknown;
-            try {
-              parsed = JSON.parse(trimmed);
-            } catch {
-              continue;
-            }
-
-            const msg = parsed as Record<string, unknown>;
-            if (msg.type === "session" || msg.type === "result") {
-              sessionId = (msg.backendSessionId as string) || sessionId;
-            }
-            if (msg.type === "result") sawResult = true;
-
-            yield msg as unknown as AgentEvent;
-          }
-        } finally {
-          reader.close();
-        }
-
-        const { exitCode, stderr } = await new Promise<{ exitCode: number | null; stderr: string }>((resolve) => {
-          if (!proc) return resolve({ exitCode: null, stderr: "" });
-          let stderrData = "";
-          proc.stderr?.on("data", (chunk: Buffer) => { stderrData += chunk.toString(); });
-          proc.on("close", (code) => resolve({ exitCode: code, stderr: stderrData }));
-        });
-
-        if (aborted) throw new Error(abortReason || "aborted");
-
-        if (exitCode !== 0 && !sawResult) {
-          yield {
-            type: "error",
-            message: stderr.trim() || `codex exited ${exitCode}`,
-            retryable: false,
-            providerDown: false,
-          };
-        }
-      },
-
-      abort(reason: string) {
-        aborted = true;
-        abortReason = reason;
-        proc?.kill();
-      },
-
-      async close() {
-        // codex is one-shot per send; nothing to tear down
-      },
-    };
+  constructor(deps?: { spawnFn?: SpawnFn }) {
+    this.spawnFn = deps?.spawnFn ?? defaultSpawn;
   }
 
-  async canResume(_backendSessionId: string, _cwd: string): Promise<boolean> {
+  async openSession(ctx: AgentSessionContext): Promise<AgentSession> {
+    return new CodexSession(ctx, this.spawnFn);
+  }
+
+  async canResume(): Promise<boolean> {
+    // v1: no thread resume; failover/continuity replays history from Clara's DB.
     return false;
+  }
+}
+
+class CodexSession implements AgentSession {
+  private _sessionId: string | null = null;
+  private aborted: string | null = null;
+  private proc: CliProc | null = null;
+
+  constructor(
+    private ctx: AgentSessionContext,
+    private spawnFn: SpawnFn,
+  ) {}
+
+  get backendSessionId(): string | null {
+    return this._sessionId;
+  }
+
+  async *send(text: string, _attachments?: Attachment[]): AsyncIterable<AgentEvent> {
+    const source: McpSourceContext = this.ctx.source ?? { channel: this.ctx.channel, room: this.ctx.room };
+    const { url, token } = await mintRun(source);
+
+    const fullPrompt = `${this.ctx.systemPrompt}\n\n---\n\n${text}`;
+    const args = [
+      "exec",
+      fullPrompt,
+      "--json",
+      "--skip-git-repo-check",
+      "--dangerously-bypass-approvals-and-sandbox",
+      "-C",
+      this.ctx.cwd,
+      "-c",
+      `mcp_servers.clara.url="${url}"`,
+      "-c",
+      `mcp_servers.clara.bearer_token_env_var="CLARA_MCP_TOKEN"`,
+    ];
+    if (this.ctx.model && this.ctx.model !== "default") args.push("-m", this.ctx.model);
+
+    const proc = this.spawnFn(args, { cwd: this.ctx.cwd, env: scrubbedEnv({ CLARA_MCP_TOKEN: token }) });
+    this.proc = proc;
+
+    const normalizer = new CodexNormalizer();
+    let sawResult = false;
+    try {
+      for await (const line of readLines(proc.stdout)) {
+        if (this.aborted) throw new Error(this.aborted);
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+        let parsed: unknown;
+        try {
+          parsed = JSON.parse(trimmed);
+        } catch {
+          continue;
+        }
+        for (const ev of normalizer.consume(parsed)) {
+          if (ev.type === "session" || ev.type === "result") {
+            this._sessionId = ev.backendSessionId || this._sessionId;
+          }
+          if (ev.type === "result") sawResult = true;
+          yield ev;
+        }
+      }
+      const exit = await proc.exited;
+      if (this.aborted) throw new Error(this.aborted);
+      if (exit !== 0 && !sawResult) {
+        const stderr = await readAll(proc.stderr);
+        yield {
+          type: "error",
+          message: stderr.trim() || `codex exited ${exit}`,
+          retryable: false,
+          providerDown: false,
+        };
+      }
+    } finally {
+      revokeRun(token);
+      this.proc = null;
+    }
+  }
+
+  abort(reason: string): void {
+    this.aborted = reason;
+    this.proc?.kill();
+  }
+
+  async close(): Promise<void> {
+    // codex exec is one-shot per send; nothing persistent to tear down.
   }
 }

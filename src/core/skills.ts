@@ -1,57 +1,79 @@
-import { existsSync, readdirSync, readFileSync } from "fs";
-import { join } from "path";
-import { getPaths } from "../utils/paths";
+import { existsSync, readFileSync, readdirSync } from "fs";
+import { join, resolve } from "path";
+import { homedir } from "os";
+import yaml from "js-yaml";
+import { getNiaHome } from "../utils/paths";
+import { log } from "../utils/log";
 
-export interface SkillInfo {
-  name: string;
-  source: string;
-  description: string;
-}
+// heyclara project root (resolved from this file's location)
+const PROJECT_ROOT = resolve(import.meta.dir, "../..");
 
-const BUILT_IN_SKILL_DIR = join(import.meta.dir, "..", "..", "skills");
+export type SkillInfo = { name: string; description: string; source: string };
 
-export function scanSkills(filter?: string): SkillInfo[] {
+export const SDK_SKILLS_SETTING = "all" as const;
+
+const SKILL_DIRS: { dir: string; source: string }[] = [
+  { dir: join(process.cwd(), "skills"), source: "cwd" },
+  { dir: join(PROJECT_ROOT, "skills"), source: "project" },
+  { dir: join(getNiaHome(), "skills"), source: "clara" },
+  { dir: join(homedir(), ".shared", "skills"), source: "shared" },
+  { dir: join(homedir(), ".claude", "skills"), source: "claude" },
+  { dir: join(homedir(), ".codex", "skills"), source: "codex" },
+];
+
+export function scanSkills(): SkillInfo[] {
   const skills: SkillInfo[] = [];
-  const sources = [BUILT_IN_SKILL_DIR, getPaths().skillsDir];
+  const seen = new Set<string>();
 
-  for (const source of sources) {
-    if (!existsSync(source)) continue;
-    const entries = readdirSync(source, { withFileTypes: true });
+  for (const { dir, source } of SKILL_DIRS) {
+    if (!existsSync(dir)) continue;
+
+    const entries = readdirSync(dir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name));
     for (const entry of entries) {
-      if (!entry.isDirectory()) continue;
-      const skillDir = join(source, entry.name);
-      const skillMd = join(skillDir, "SKILL.md");
-      if (!existsSync(skillMd)) continue;
+      if (!entry.isDirectory() || entry.name.startsWith(".")) continue;
 
-      const content = readFileSync(skillMd, "utf8");
-      const description = extractDescription(content);
+      const skillFile = join(dir, entry.name, "SKILL.md");
+      if (!existsSync(skillFile)) continue;
+
+      const content = readFileSync(skillFile, "utf8");
+      const fmMatch = content.match(/^---\n([\s\S]*?)\n---/);
+      if (!fmMatch) continue;
+
+      let meta: Record<string, unknown> = {};
+      try {
+        meta = (yaml.load(fmMatch[1]) as Record<string, unknown>) || {};
+      } catch (err) {
+        log.warn({ err, skill: entry.name, path: skillFile }, "failed to parse skill metadata, skipping");
+        continue;
+      }
+      const name = (typeof meta.name === "string" ? meta.name : "") || entry.name;
+
+      const key = name.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+
       skills.push({
-        name: entry.name,
-        source: source === BUILT_IN_SKILL_DIR ? "built-in" : "user",
-        description,
+        name,
+        description: typeof meta.description === "string" ? meta.description : "",
+        source,
       });
     }
   }
 
-  if (filter) return skills.filter((s) => s.source === filter);
   return skills;
+}
+
+export function getSkillNames(): string[] {
+  return scanSkills().map((s) => s.name);
 }
 
 export function getSkillsSummary(): string {
   const skills = scanSkills();
   if (skills.length === 0) return "";
-
-  const lines = skills.map((s) => `- **${s.name}** (${s.source}): ${s.description}`);
-  return `## Available Skills\n${lines.join("\n")}`;
+  const lines = skills.map((s) => (s.description ? `- /${s.name}: ${s.description}` : `- /${s.name}`));
+  return `Available skills:\n${lines.join("\n")}`;
 }
 
-function extractDescription(content: string): string {
-  const lines = content.split("\n");
-  for (const line of lines) {
-    const trimmed = line.trim();
-    if (trimmed.startsWith("description:") || trimmed.startsWith("Description:")) {
-      return trimmed.split(":")[1]?.trim() || "";
-    }
-  }
-  return "";
+export function getSdkSkillsSetting(): typeof SDK_SKILLS_SETTING {
+  return SDK_SKILLS_SETTING;
 }

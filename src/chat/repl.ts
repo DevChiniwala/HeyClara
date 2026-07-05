@@ -1,103 +1,263 @@
-import { createInterface } from "readline";
+import * as readline from "readline";
 import { createChatEngine } from "./engine";
-import { getMcpServers } from "../mcp";
-import { getSql } from "../db/connection";
-import { log } from "../utils/log";
+import { runMigrations } from "../db/migrate";
+import { closeDb } from "../db/connection";
+import { getMcpServers, setMcpFactory } from "../mcp";
+import { createClaraMcpServer } from "../mcp/server";
+import { Session } from "../db/models";
+import { relativeTime } from "../utils/format";
+import { DIM, BOLD, CYAN, RESET, CLEAR_LINE, SPINNER } from "../utils/cli";
+
+class StatusLine {
+  private frame = 0;
+  private timer: ReturnType<typeof setInterval> | null = null;
+  private text = "";
+  private active = false;
+
+  start(initialText = "thinking") {
+    this.text = initialText;
+    this.active = true;
+    this.frame = 0;
+    this.render();
+    this.timer = setInterval(() => {
+      this.frame = (this.frame + 1) % SPINNER.length;
+      this.render();
+    }, 80);
+  }
+
+  update(text: string) {
+    this.text = text;
+    if (this.active) this.render();
+  }
+
+  stop() {
+    if (this.timer) {
+      clearInterval(this.timer);
+      this.timer = null;
+    }
+    if (this.active) {
+      process.stderr.write(CLEAR_LINE);
+    }
+    this.active = false;
+  }
+
+  private render() {
+    const spinner = SPINNER[this.frame];
+    process.stderr.write(`${CLEAR_LINE}${DIM}  ${spinner} ${this.text}${RESET}`);
+  }
+}
+
+function truncatePreview(text: string, max: number): string {
+  const oneline = text.replace(/\n/g, " ").trim();
+  return oneline.length > max ? oneline.slice(0, max) + "…" : oneline;
+}
+
+async function pickSession(): Promise<string | null> {
+  const sessions = await Session.getRecent("terminal", 10);
+  if (sessions.length === 0) {
+    console.log(`${DIM}no previous sessions${RESET}\n`);
+    return null;
+  }
+
+  const now = new Date();
+  console.log(`\n${DIM}recent sessions:${RESET}\n`);
+
+  for (let i = 0; i < sessions.length; i++) {
+    const s = sessions[i];
+    const age = relativeTime(new Date(s.updatedAt), now);
+    const preview = s.preview ? truncatePreview(s.preview, 50) : "empty session";
+    const msgs = `${s.messageCount} msg${s.messageCount !== 1 ? "s" : ""}`;
+    console.log(`  ${BOLD}${i + 1}${RESET}  ${preview}  ${DIM}${msgs} · ${age}${RESET}`);
+  }
+
+  console.log(`\n  ${DIM}n${RESET}  start new session`);
+  console.log();
+
+  return new Promise<string | null>((resolve) => {
+    const rl = readline.createInterface({
+      input: process.stdin,
+      output: process.stdout,
+    });
+
+    rl.question(`${DIM}select [1-${sessions.length}, n]:${RESET} `, (answer) => {
+      rl.close();
+      const trimmed = answer.trim().toLowerCase();
+
+      if (trimmed === "n" || trimmed === "new") {
+        resolve(null);
+        return;
+      }
+
+      const idx = parseInt(trimmed, 10);
+      if (idx >= 1 && idx <= sessions.length) {
+        resolve(sessions[idx - 1].id);
+      } else if (trimmed === "" && sessions.length > 0) {
+        // Default: most recent session
+        resolve(sessions[0].id);
+      } else {
+        resolve(null);
+      }
+    });
+  });
+}
+
+export type ChatMode = "continue" | "new" | "pick";
+
+export interface ReplContext {
+  employee?: string;
+  agent?: string;
+  job?: string;
+  initialMessage?: string;
+}
 
 export async function startRepl(
-  mode: "new" | "continue" | "pick" = "new",
-  simChannel?: string,
-  context?: { employee?: string; agent?: string; job?: string },
+  mode: ChatMode = "continue",
+  simulateChannel?: string,
+  context?: ReplContext,
 ): Promise<void> {
-  const channel = simChannel || "terminal";
-  const room = context?.employee
-    ? `terminal-emp-${context.employee}`
-    : context?.agent
-      ? `terminal-agent-${context.agent}`
-      : context?.job
-        ? `terminal-job-${context.job}`
-        : `terminal-${process.ppid}`;
+  try {
+    await runMigrations();
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error(`Failed to connect to postgres: ${msg}`);
+    console.error(`Set database_url in ~/.heyclara/config.yaml or run \`clara init\``);
+    process.exit(1);
+  }
 
-  const resume = mode === "continue" ? true : mode === "pick" ? (await pickSession()) ?? false : false;
+  // Initialize MCP server factory if not already set (standalone chat mode)
+  if (!getMcpServers()) {
+    setMcpFactory((ctx) => ({ clara: createClaraMcpServer(ctx) }));
+  }
 
+  // Determine session to use
+  let resume: boolean | string = false;
+
+  if (mode === "pick") {
+    const picked = await pickSession();
+    if (picked) {
+      resume = picked;
+    }
+  } else if (mode === "continue") {
+    resume = true;
+  }
+
+  const channel = simulateChannel || "terminal";
+  const contextLabel = context?.employee || context?.agent || context?.job;
+  const room = contextLabel ? `chat-${contextLabel}` : "terminal";
   const engine = await createChatEngine({
     room,
     channel,
     resume,
-    mcpServers: getMcpServers({ channel: "terminal", room }),
-    ...context,
+    mcpServers: getMcpServers(),
+    employee: context?.employee,
+    agent: context?.agent,
+    job: context?.job,
   });
 
-  console.log(`Clara chat started (room: ${room})${engine.sessionId ? " [resumed]" : ""}. Type /quit to exit.`);
+  // Welcome
+  const isResumed = engine.sessionId && resume;
+  const sessionNote = isResumed ? "resumed" : "new session";
+  const channelNote = simulateChannel ? ` as ${simulateChannel}` : "";
+  const contextNote = contextLabel ? ` as ${contextLabel}` : "";
+  console.log(`\n${DIM}clara chat${contextNote}${channelNote}${RESET} ${DIM}(${sessionNote})${RESET}`);
+  console.log(`${DIM}type /exit to quit${RESET}\n`);
 
-  const rl = createInterface({ input: process.stdin, output: process.stdout, prompt: "> " });
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout,
+    prompt: `${BOLD}>${RESET} `,
+  });
+
+  async function sendAndDisplay(input: string): Promise<void> {
+    const status = new StatusLine();
+    status.start("thinking");
+
+    let streamedLength = 0;
+    let responseStarted = false;
+
+    try {
+      const { result, costUsd, turns } = await engine.send(input, {
+        onStream(textSoFar) {
+          if (!responseStarted) {
+            status.stop();
+            process.stdout.write("\n");
+            responseStarted = true;
+          }
+          const newText = textSoFar.slice(streamedLength);
+          if (newText) {
+            process.stdout.write(newText);
+            streamedLength = textSoFar.length;
+          }
+        },
+        onActivity(activityText) {
+          if (!responseStarted) {
+            status.update(activityText);
+          }
+        },
+      });
+
+      if (!responseStarted && result.trim()) {
+        status.stop();
+        process.stdout.write(`\n${result.trim()}`);
+      } else if (responseStarted) {
+        const remaining = result.slice(streamedLength);
+        if (remaining.trim()) {
+          process.stdout.write(remaining);
+        }
+      } else {
+        status.stop();
+      }
+
+      const costStr = costUsd > 0 ? `$${costUsd.toFixed(4)}` : "";
+      const turnsStr = turns > 0 ? `${turns} turn${turns !== 1 ? "s" : ""}` : "";
+      const meta = [costStr, turnsStr].filter(Boolean).join(" · ");
+      if (meta) {
+        process.stdout.write(`\n${DIM}${meta}${RESET}`);
+      }
+
+      process.stdout.write("\n\n");
+    } catch (err) {
+      status.stop();
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error(`\n${DIM}error:${RESET} ${msg}\n`);
+    }
+  }
+
+  // Auto-send initial message if provided (e.g. onboarding kickoff)
+  if (context?.initialMessage) {
+    await sendAndDisplay(context.initialMessage);
+  }
+
   rl.prompt();
 
-  for await (const line of rl) {
+  rl.on("line", async (line: string) => {
     const input = line.trim();
-    if (!input) { rl.prompt(); continue; }
-    if (input === "/quit") break;
-    if (input === "/new") {
-      await engine.close();
-      console.log("Starting new session...");
-      return startRepl("new", simChannel, context);
+
+    if (!input) {
+      rl.prompt();
+      return;
     }
 
-    const { DIM, RESET } = await import("../utils/cli");
-    process.stdout.write(`${DIM}thinking${RESET}`);
-
-    let streamedLen = 0;
-    const result = await engine.send(input, {
-      onStream(accumulated) {
-        const chunk = accumulated.slice(streamedLen);
-        if (chunk) { process.stdout.write(`\r\x1b[2K\r${accumulated}`); streamedLen = accumulated.length; }
-      },
-      onActivity() {
-        process.stdout.write(`\r\x1b[2K\r`);
-      },
-    });
-
-    if (!streamedLen && result.result) {
-      process.stdout.write(`\r\x1b[2K\r${result.result}`);
-    } else if (streamedLen < result.result.length) {
-      process.stdout.write(result.result.slice(streamedLen));
+    const exitCommands = ["/exit", "/quit", ".exit", ".quit", "exit", "quit"];
+    if (exitCommands.includes(input.toLowerCase())) {
+      rl.close();
+      return;
     }
-    process.stdout.write("\n");
 
-    if (result.costUsd > 0) {
-      process.stderr.write(`${DIM}$${result.costUsd.toFixed(4)}${RESET}\n`);
-    }
+    await sendAndDisplay(input);
 
     rl.prompt();
-  }
-
-  await engine.close();
-  rl.close();
-}
-
-async function pickSession(): Promise<string | false> {
-  const { Session } = await import("../db/models");
-  const sessions = await Session.listRecent(10);
-  if (sessions.length === 0) {
-    console.log("No previous sessions.");
-    return false;
-  }
-  console.log("Recent sessions:");
-  sessions.forEach((s, i) => {
-    const preview = s.preview ? s.preview.slice(0, 60) : "(empty)";
-    console.log(`  ${i + 1}. [${s.room}] ${preview}`);
   });
 
-  return new Promise((resolve) => {
-    const rl = createInterface({ input: process.stdin, output: process.stdout, prompt: "Pick session (1-N) or 0 for new: " });
-    rl.on("line", (line) => {
-      const n = parseInt(line.trim(), 10);
-      if (n > 0 && n <= sessions.length) {
-        resolve(sessions[n - 1].id);
-      } else {
-        resolve(false);
-      }
-      rl.close();
-    });
+  rl.on("close", async () => {
+    console.log(`\n${DIM}bye${RESET}`);
+    await engine.close();
+    closeDb()
+      .catch(() => {})
+      .finally(() => process.exit(0));
+  });
+
+  process.on("SIGINT", () => {
+    rl.close();
   });
 }

@@ -1,7 +1,19 @@
-const VALID_JOB_NAME = /^[a-zA-Z0-9_-]+$/;
+import { isAbsolute, relative, resolve } from "path";
 
-export function validateJobName(name: string): void {
-  if (!name || name.length < 1) throw new Error("Job name must not be empty");
-  if (!VALID_JOB_NAME.test(name)) throw new Error(`Invalid job name "${name}": only letters, numbers, hyphens, and underscores allowed`);
-  if (name.length > 64) throw new Error(`Job name too long: "${name}" (max 64 chars)`);
+import { getPaths } from "./paths";
+
+export function getJobDir(jobName: string): string {
+  const jobsDir = resolve(getPaths().jobsDir);
+  const jobDir = resolve(jobsDir, jobName);
+  const rel = relative(jobsDir, jobDir);
+
+  if (!rel || rel.startsWith("..") || isAbsolute(rel)) {
+    throw new Error(`Invalid job name "${jobName}": job workspace must stay inside ${jobsDir}`);
+  }
+
+  return jobDir;
+}
+
+export function validateJobName(jobName: string): void {
+  getJobDir(jobName);
 }

@@ -1,81 +1,184 @@
-import { existsSync, readFileSync, writeFileSync } from "fs";
-import { homedir } from "os";
-import { runJobWithBackend } from "./runner";
-import { getPaths } from "../utils/paths";
+/**
+ * Memory consolidator — stage 1 of the two-stage memory pipeline.
+ *
+ * After a chat session goes idle, reflects on the transcript and appends
+ * CANDIDATE memories to ~/.heyclara/self/staging.md. The nightly
+ * memory-promoter job handles promotion from staging to memory.md/rules.md.
+ * The write-path restriction is enforced by the consolidator prompt, not
+ * by tool sandboxing.
+ *
+ * See AGENTS.md > "Two-stage memory" for the full architecture.
+ */
+
+import { Message } from "../db/models";
+import { runTask } from "./runner";
 import { log } from "../utils/log";
+import type { SessionMessage } from "../types";
 
-export async function consolidateMemory(messages: string): Promise<string> {
-  const systemPrompt = [
-    "You are a memory consolidator. Review the conversation below and extract up to 3",
-    "concise, factual memories that Clara should remember permanently.",
-    "Rules for memories:",
-    "- Max 300 characters each",
-    "- One insight per entry",
-    "- No raw logs, no transcripts, no status dumps",
-    "- Only include things that are likely to be useful in future conversations",
-    "",
-    "Return each memory on a separate line starting with '- '.",
-    "If nothing worth remembering, return nothing.",
-  ].join("\n");
+/** Bounded dedup: sessionId → message count at last consolidation. Prevents re-processing
+ *  the same messages while allowing re-consolidation when new turns arrive. */
+const processedCounts = new Map<string, number>();
+const inFlight = new Set<string>();
+const MAX_TRACKED = 500;
 
-  const result = await runJobWithBackend(systemPrompt, messages, homedir());
+/** Max messages to include in transcript (most recent). Keeps prompt size bounded. */
+const MAX_TRANSCRIPT_MESSAGES = 50;
 
-  if (result.error) {
-    log.warn({ error: result.error }, "memory consolidation failed");
-    return "";
-  }
-
-  const memories = result.agentText.trim();
-  if (memories) {
-    stageMemories(memories);
-  }
-
-  return memories;
+/** Rooms to skip (placeholder sessions). */
+function shouldSkip(room: string): boolean {
+  return room.includes("placeholder");
 }
 
-function stageMemories(content: string): void {
-  const stagingPath = `${getPaths().selfDir}/staging.md`;
-  const existing = existsSync(stagingPath) ? readFileSync(stagingPath, "utf8").trim() : "";
-  const updated = existing ? `${existing}\n\n${content}` : content;
-  writeFileSync(stagingPath, updated + "\n");
+/** Format conversation transcript for the extraction prompt. Cap to recent messages. */
+function formatTranscript(messages: SessionMessage[]): string {
+  const recent = messages.slice(-MAX_TRANSCRIPT_MESSAGES);
+  const skipped = messages.length - recent.length;
+  const prefix = skipped > 0 ? `[...${skipped} earlier messages omitted]\n\n` : "";
+
+  return prefix + recent.map((m) => `[${m.sender}] (${m.createdAt}): ${m.content.slice(0, 2000)}`).join("\n\n");
 }
 
-export async function promoteStagedMemories(): Promise<number> {
-  const stagingPath = `${getPaths().selfDir}/staging.md`;
-  if (!existsSync(stagingPath)) return 0;
+/** Build the consolidation prompt from a conversation transcript. */
+function buildConsolidationPrompt(transcript: string, source: string): string {
+  const today = new Date().toISOString().slice(0, 10);
+  return `Job: memory-consolidation (triggered by ${source})
 
-  const content = readFileSync(stagingPath, "utf8").trim();
-  if (!content) return 0;
+A chat session has gone idle. Your task is to reflect on it and update
+the memory staging log — NOT the durable memory files.
 
-  const systemPrompt = [
-    "Review the staged memories below. For each one, decide if it should be",
-    "permanently added to Clara's memory.md. Rules:",
-    "- Only promote if truly durable (preferences, facts about the owner, important context)",
-    "- Skip transient observations, one-off events, or duplicate entries",
-    "- Skip staging instructions or meta-commentary",
-    "",
-    "Return the entries to promote, one per line starting with '- '.",
-    "If none should be promoted, return nothing.",
-  ].join("\n");
+## Context
 
-  const result = await runJobWithBackend(systemPrompt, content, homedir());
+Clara uses a two-stage memory architecture. You are stage 1.
 
-  if (result.error) {
-    log.warn({ error: result.error }, "memory promotion failed");
-    return 0;
+- Stage 1 (you): append candidates to \`~/.heyclara/self/staging.md\`. Never
+  write to \`memory.md\` or \`rules.md\` directly.
+- Stage 2: the nightly \`memory-promoter\` job reviews candidates with
+  \`count >= 2\` and promotes qualifying ones to durable memory. Entries with
+  \`count < 2\` expire after 14 days.
+
+Your persona includes guidance to "save proactively" — that guidance applies
+to LIVE chat, where you act on immediate user instruction. In THIS
+consolidation pass, be selective but not paralyzed. If you see a genuine
+learning, stage it. The promoter handles quality gating — your job is to
+not miss real signals, not to be maximally conservative.
+
+## Transcript
+
+${transcript}
+
+## Step 1 — Read existing state
+
+Read these files in full before doing anything else. You need to know what
+already exists so you can dedupe and reinforce rather than duplicate.
+
+- \`~/.heyclara/self/memory.md\` — durable facts already saved
+- \`~/.heyclara/self/rules.md\` — behavioral rules already in effect
+- \`~/.heyclara/self/staging.md\` — candidates already staged (including the
+  file's header, which documents the staging format)
+
+## Step 2 — Reflect
+
+Answer these questions silently. If the answer to all of them is "nothing",
+stop here and do not write anything.
+
+1. What did the user correct, clarify, or teach you in this session?
+   (Includes: "no, do it this way", "don't use X", "always check Y first")
+2. What NEW fact about the user, their projects, or their systems do you
+   now know that you did not at session start?
+   (Includes: architecture decisions, workflow patterns, tool preferences,
+   team structure, external system details discovered during task execution)
+3. What decision was made that will constrain future work?
+   (Includes: "we're using X not Y", config changes, deployment patterns)
+4. What did the user explicitly ask to be remembered?
+
+Trivial small talk, greetings, and pure status updates are NOT answers.
+But corrections made DURING task execution ("no, check DynamoDB not S3"),
+architecture learned while debugging ("ah, this service talks to X via Y"),
+and workflow patterns revealed by how the user works — these ARE answers.
+The bar is: would a fresh Clara session benefit from knowing this?
+
+## Step 3 — Update staging.md
+
+For each substantive answer:
+
+1. Check \`memory.md\` and \`rules.md\`. If the learning is already covered
+   there, do nothing — it is already durable.
+2. Check \`staging.md\`. If there is a near-match (same subject, same intent,
+   even if worded differently):
+   - Use the Edit tool to bump the count: \`[1×]\` → \`[2×]\`, \`[2×]\` → \`[3×]\`
+   - Update the \`last_seen\` date to \`${today}\`
+   - Do NOT append a new line
+3. If genuinely new AND durable AND fits one of the four types, append a
+   new line to staging.md using this exact format:
+
+   \`- [1×] [type] content :: ${today} → ${today}\`
+
+   Where \`type\` is exactly one of:
+   - \`persona\`    — facts about the user (role, habits, preferences)
+   - \`project\`    — active work decisions, architecture, stakeholders
+   - \`reference\`  — pointers to external systems (dashboards, repos)
+   - \`correction\` — behavioral preference for how Clara should work
+
+   If the learning does not fit one of these four types, do not stage it.
+
+## Hard constraints
+
+- Do NOT write to \`memory.md\` or \`rules.md\`. Only the promoter job can.
+- Do NOT use \`add_memory\` or \`add_rule\` MCP tools. Edit staging.md directly.
+- Do NOT message the user.
+- If nothing qualifies, do nothing. But don't be so conservative that the
+  pipeline starves — if you're skipping every session, your bar is too high.
+
+Report a one-line summary of what you did: "staged N new / reinforced M /
+skipped (trivial session)". No preamble.`;
+}
+
+async function runConsolidation(transcript: string, source: string): Promise<void> {
+  const output = await runTask({
+    name: "consolidator",
+    prompt: buildConsolidationPrompt(transcript, source),
+  });
+  // runTask returns {error} on failure instead of throwing; escalate so
+  // consolidateSession doesn't mark the session processed on a failed run.
+  if (output.error) {
+    throw new Error(`consolidator task failed: ${output.error}`);
   }
+}
 
-  const promoted = result.agentText.trim();
-  if (!promoted) return 0;
+/**
+ * Consolidate a chat session's conversation into memories.
+ * Called when a chat engine goes idle or is explicitly closed.
+ */
+export async function consolidateSession(sessionId: string, room: string): Promise<void> {
+  if (shouldSkip(room)) return;
+  if (inFlight.has(sessionId)) return;
 
-  const memoryPath = `${getPaths().selfDir}/memory.md`;
-  const existingMemory = existsSync(memoryPath) ? readFileSync(memoryPath, "utf8").trim() : "";
-  const updatedMemory = existingMemory ? `${existingMemory}\n\n${promoted}` : promoted;
-  writeFileSync(memoryPath, updatedMemory + "\n");
+  try {
+    const messages = await Message.getBySession(sessionId);
+    if (messages.length < 2) return;
 
-  writeFileSync(stagingPath, "");
+    // Skip if already processed this exact message count
+    if (processedCounts.get(sessionId) === messages.length) return;
 
-  const count = promoted.split("\n").filter((l) => l.trim().startsWith("- ")).length;
-  log.info({ count }, "staged memories promoted to memory.md");
-  return count;
+    inFlight.add(sessionId);
+
+    log.info({ sessionId, room, messageCount: messages.length }, "consolidator: extracting memories from chat");
+
+    const transcript = formatTranscript(messages);
+    await runConsolidation(transcript, `chat session idle — ${room}`);
+
+    // Mark as processed only on success
+    processedCounts.set(sessionId, messages.length);
+
+    // Evict oldest entries when over cap
+    if (processedCounts.size > MAX_TRACKED) {
+      const firstKey = processedCounts.keys().next().value;
+      if (firstKey) processedCounts.delete(firstKey);
+    }
+  } catch (err) {
+    log.error({ err, sessionId, room }, "consolidator: chat extraction failed");
+    throw err;
+  } finally {
+    inFlight.delete(sessionId);
+  }
 }

@@ -1,28 +1,28 @@
-import type { Channel, ChannelFactory } from "../types/channel";
+import type { Channel, ChannelFactory } from "../types";
 
 const factories: ChannelFactory[] = [];
-const started: Channel[] = [];
+const started: Map<string, Channel> = new Map();
 
 export function registerChannel(factory: ChannelFactory): void {
   factories.push(factory);
 }
 
-export function getFactories(): ChannelFactory[] {
+export function getFactories(): readonly ChannelFactory[] {
   return factories;
 }
 
 export function trackStarted(channel: Channel): void {
-  started.push(channel);
-}
-
-export function getStarted(): Channel[] {
-  return [...started];
-}
-
-export function clearStarted(): void {
-  started.length = 0;
+  started.set(channel.name, channel);
 }
 
 export function getChannel(name: string): Channel | undefined {
-  return started.find((c) => c.name === name);
+  return started.get(name);
+}
+
+export function getStarted(): Channel[] {
+  return [...started.values()];
+}
+
+export function clearStarted(): void {
+  started.clear();
 }

@@ -1,93 +1,251 @@
-/**
- * OS service management for Clara daemon.
- * Supports launchd (macOS) and systemd (Linux).
- */
-import { existsSync, writeFileSync, unlinkSync } from "fs";
+import { existsSync, mkdirSync, writeFileSync, unlinkSync } from "fs";
+import { join, resolve } from "path";
 import { homedir } from "os";
-import { join } from "path";
+import { getPaths } from "../utils/paths";
+import { findDaemonPids } from "../core/daemon";
+import { clearForceShutdownRequest, requestForceShutdown } from "../core/force-shutdown";
 
-function getBunPath(): string {
-  try {
-    const result = Bun.spawnSync(["which", "bun"]);
-    return new TextDecoder().decode(result.stdout).trim() || "bun";
-  } catch {
-    return "bun";
+const PLIST_NAME = "com.heyclara.agent";
+const SYSTEMD_UNIT = "heyclara.service";
+
+function getExecCommand(): [string, string] {
+  const execPath = process.execPath;
+  // process.argv[1] may be undefined when called outside the normal CLI flow
+  // (e.g. from bun -e or programmatic import). Fall back to the known entry point.
+  let cliPath = process.argv[1];
+  if (!cliPath || cliPath === "undefined") {
+    const { resolve } = require("path");
+    cliPath = resolve(import.meta.dir, "../cli/index.ts");
   }
+  return [execPath, cliPath];
 }
 
-function getClaraPath(): string {
-  return join(import.meta.dir, "..", "cli", "index.ts");
+// --- macOS launchd ---
+
+function plistPath(): string {
+  return join(homedir(), "Library", "LaunchAgents", `${PLIST_NAME}.plist`);
 }
 
-function getServiceName(): string {
-  return "com.heyclara.daemon";
-}
+function buildPlist(): string {
+  const paths = getPaths();
+  const [execPath, cliPath] = getExecCommand();
+  // Bun auto-loads .env from cwd. Without WorkingDirectory, launchd
+  // spawns the daemon with cwd=/ and any credentials in .env never load.
+  const workingDir = resolve(cliPath, "../../..");
 
-export function isServiceInstalled(): boolean {
-  if (process.platform === "darwin") {
-    const plist = join(homedir(), "Library", "LaunchAgents", `${getServiceName()}.plist`);
-    return existsSync(plist);
-  }
-  return false;
-}
-
-export async function registerService(): Promise<void> {
-  if (process.platform !== "darwin") return;
-
-  const plistPath = join(homedir(), "Library", "LaunchAgents", `${getServiceName()}.plist`);
-  if (existsSync(plistPath)) return;
-
-  const plist = `<?xml version="1.0" encoding="UTF-8"?>
+  return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
   <key>Label</key>
-  <string>${getServiceName()}</string>
+  <string>${PLIST_NAME}</string>
   <key>ProgramArguments</key>
   <array>
-    <string>${getBunPath()}</string>
-    <string>${getClaraPath()}</string>
+    <string>${execPath}</string>
+    <string>${cliPath}</string>
     <string>run</string>
   </array>
+  <key>WorkingDirectory</key>
+  <string>${workingDir}</string>
   <key>RunAtLoad</key>
   <true/>
   <key>KeepAlive</key>
-  <true/>
+  <dict>
+    <key>SuccessfulExit</key>
+    <false/>
+  </dict>
+  <key>ThrottleInterval</key>
+  <integer>10</integer>
   <key>StandardOutPath</key>
-  <string>${join(homedir(), ".clara", "tmp", "daemon.log")}</string>
+  <string>${paths.daemonLog}</string>
   <key>StandardErrorPath</key>
-  <string>${join(homedir(), ".clara", "tmp", "daemon.log")}</string>
+  <string>${paths.daemonLog}</string>
   <key>EnvironmentVariables</key>
   <dict>
     <key>PATH</key>
-    <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+    <string>${process.env.PATH || "/usr/local/bin:/usr/bin:/bin"}</string>
   </dict>
 </dict>
 </plist>`;
-
-  writeFileSync(plistPath, plist);
-
-  try {
-    Bun.spawnSync(["launchctl", "load", plistPath]);
-  } catch {}
 }
 
-export async function unregisterService(opts: { force?: boolean } = {}): Promise<void> {
-  if (process.platform !== "darwin") return;
+async function installLaunchd(): Promise<void> {
+  const paths = getPaths();
+  const path = plistPath();
 
-  const plistPath = join(homedir(), "Library", "LaunchAgents", `${getServiceName()}.plist`);
-  if (!existsSync(plistPath)) return;
+  mkdirSync(join(homedir(), "Library", "LaunchAgents"), { recursive: true });
+  mkdirSync(`${paths.home}/tmp`, { recursive: true });
+  writeFileSync(path, buildPlist());
 
-  try {
-    Bun.spawnSync(["launchctl", "unload", plistPath]);
-  } catch {}
+  // Unload first (ignore errors if not loaded)
+  const unload = Bun.spawn(["launchctl", "unload", path], { stdout: "pipe", stderr: "pipe" });
+  await unload.exited;
 
-  if (opts.force) {
-    try { unlinkSync(plistPath); } catch {}
+  const load = Bun.spawn(["launchctl", "load", path], { stdout: "pipe", stderr: "pipe" });
+  const exitCode = await load.exited;
+
+  if (exitCode !== 0) {
+    const stderr = await new Response(load.stderr).text();
+    throw new Error(`launchctl load failed: ${stderr.trim()}`);
   }
 }
 
+async function uninstallLaunchd(): Promise<void> {
+  const path = plistPath();
+  if (!existsSync(path)) return;
+
+  // Unload to stop the process and disable KeepAlive respawn.
+  // Keep the plist file so RunAtLoad starts the daemon on next login.
+  const unload = Bun.spawn(["launchctl", "unload", path], { stdout: "pipe", stderr: "pipe" });
+  await unload.exited;
+}
+
+function isLaunchdInstalled(): boolean {
+  return existsSync(plistPath());
+}
+
+// --- Linux systemd ---
+
+function unitPath(): string {
+  return join(homedir(), ".config", "systemd", "user", SYSTEMD_UNIT);
+}
+
+function buildUnit(): string {
+  const paths = getPaths();
+  const [execPath, cliPath] = getExecCommand();
+  const workingDir = resolve(cliPath, "../../..");
+
+  return `[Unit]
+Description=nia personal AI assistant
+After=network.target
+
+[Service]
+ExecStart=${execPath} ${cliPath} run
+WorkingDirectory=${workingDir}
+Restart=always
+RestartSec=5
+StandardOutput=append:${paths.daemonLog}
+StandardError=append:${paths.daemonLog}
+Environment=PATH=${process.env.PATH || "/usr/local/bin:/usr/bin:/bin"}
+
+[Install]
+WantedBy=default.target
+`;
+}
+
+async function installSystemd(): Promise<void> {
+  const paths = getPaths();
+  const path = unitPath();
+
+  mkdirSync(join(homedir(), ".config", "systemd", "user"), { recursive: true });
+  mkdirSync(`${paths.home}/tmp`, { recursive: true });
+  writeFileSync(path, buildUnit());
+
+  const reload = Bun.spawn(["systemctl", "--user", "daemon-reload"], { stdout: "pipe", stderr: "pipe" });
+  await reload.exited;
+
+  const enable = Bun.spawn(["systemctl", "--user", "enable", "--now", SYSTEMD_UNIT], {
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  const exitCode = await enable.exited;
+
+  if (exitCode !== 0) {
+    const stderr = await new Response(enable.stderr).text();
+    throw new Error(`systemctl enable failed: ${stderr.trim()}`);
+  }
+}
+
+async function uninstallSystemd(): Promise<void> {
+  const path = unitPath();
+  if (!existsSync(path)) return;
+
+  const disable = Bun.spawn(["systemctl", "--user", "disable", "--now", SYSTEMD_UNIT], {
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  await disable.exited;
+
+  try {
+    unlinkSync(path);
+  } catch {
+    /* already gone */
+  }
+
+  const reload = Bun.spawn(["systemctl", "--user", "daemon-reload"], { stdout: "pipe", stderr: "pipe" });
+  await reload.exited;
+}
+
+function isSystemdInstalled(): boolean {
+  return existsSync(unitPath());
+}
+
+// --- Public API (platform-aware) ---
+
+export async function registerService(): Promise<void> {
+  if (process.platform === "darwin") {
+    await installLaunchd();
+  } else if (process.platform === "linux") {
+    await installSystemd();
+  }
+  // Windows/other: no-op, daemon still works via startDaemon()
+}
+
+export async function unregisterService(opts: { force?: boolean } = {}): Promise<void> {
+  if (opts.force) requestForceShutdown(findDaemonPids());
+  if (process.platform === "darwin") {
+    await uninstallLaunchd();
+  } else if (process.platform === "linux") {
+    await uninstallSystemd();
+  }
+}
+
+export function isServiceInstalled(): boolean {
+  if (process.platform === "darwin") return isLaunchdInstalled();
+  if (process.platform === "linux") return isSystemdInstalled();
+  return false;
+}
+
+/** Restart via service manager. Waits for old process to fully exit before starting new one. */
 export async function restartService(opts: { force?: boolean } = {}): Promise<void> {
-  await unregisterService(opts);
-  await registerService();
+  if (opts.force) requestForceShutdown(findDaemonPids());
+  const waitMs = opts.force ? 30_000 : 310_000;
+  if (process.platform === "darwin") {
+    const path = plistPath();
+    // Unload — sends SIGTERM and disables KeepAlive respawn
+    const unload = Bun.spawn(["launchctl", "unload", path], { stdout: "pipe", stderr: "pipe" });
+    if ((await unload.exited) !== 0) {
+      const stderr = await new Response(unload.stderr).text();
+      console.error(`  warning: launchctl unload failed: ${stderr.trim()}`);
+    }
+    // Wait for old daemon to fully exit (graceful shutdown may take time for active engines)
+    await waitForDaemonExit(waitMs);
+    if (opts.force) clearForceShutdownRequest();
+    // Load — starts a fresh single instance
+    const load = Bun.spawn(["launchctl", "load", path], { stdout: "pipe", stderr: "pipe" });
+    if ((await load.exited) !== 0) {
+      const stderr = await new Response(load.stderr).text();
+      console.error(`  warning: launchctl load failed: ${stderr.trim()}`);
+    }
+  } else if (process.platform === "linux") {
+    // systemd restart handles stop-wait-start internally
+    const restart = Bun.spawn(["systemctl", "--user", "restart", SYSTEMD_UNIT], { stdout: "pipe", stderr: "pipe" });
+    await restart.exited;
+    if (opts.force) await waitForDaemonExit(waitMs);
+    if (opts.force) clearForceShutdownRequest();
+  }
+}
+
+async function waitForDaemonExit(timeoutMs: number): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (findDaemonPids().length === 0) return;
+    await new Promise((r) => setTimeout(r, 200));
+  }
+  // Force kill any stragglers
+  for (const pid of findDaemonPids()) {
+    try {
+      process.kill(pid, "SIGKILL");
+    } catch {}
+  }
 }

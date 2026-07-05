@@ -1,23 +1,78 @@
-import { existsSync, readFileSync, writeFileSync, appendFileSync } from "fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
+import { dirname } from "path";
 import { getPaths } from "./paths";
-import type { AuditEntry, CronState } from "../types/audit";
+import type { AuditEntry, JobState, CronState } from "../types";
+
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function hasString(value: unknown): value is string {
+  return typeof value === "string";
+}
+
+function hasNumber(value: unknown): value is number {
+  return typeof value === "number";
+}
+
+function isJobState(value: unknown): value is JobState {
+  return (
+    isObject(value) &&
+    hasString(value.lastRun) &&
+    (value.status === "ok" || value.status === "error" || value.status === "running") &&
+    hasNumber(value.duration_ms)
+  );
+}
+
+function isCronState(value: unknown): value is CronState {
+  if (!isObject(value)) return false;
+  for (const [k, v] of Object.entries(value)) {
+    if (!hasString(k) || !isJobState(v)) return false;
+  }
+  return true;
+}
+
+export function appendAudit(entry: AuditEntry): void {
+  const { cronAudit } = getPaths();
+  mkdirSync(dirname(cronAudit), { recursive: true });
+  appendFileSync(cronAudit, JSON.stringify(entry) + "\n");
+}
 
 export function readState(): CronState {
-  const { stateFile } = getPaths();
-  if (!existsSync(stateFile)) return {};
+  const { cronState } = getPaths();
+  if (!existsSync(cronState)) return {};
+
   try {
-    return JSON.parse(readFileSync(stateFile, "utf8"));
+    const parsed = JSON.parse(readFileSync(cronState, "utf8"));
+    return isCronState(parsed) ? parsed : {};
   } catch {
     return {};
   }
 }
 
 export function writeState(state: CronState): void {
-  const { stateFile } = getPaths();
-  writeFileSync(stateFile, JSON.stringify(state, null, 2));
+  const { cronState } = getPaths();
+  mkdirSync(dirname(cronState), { recursive: true });
+  writeFileSync(cronState, JSON.stringify(state, null, 2));
 }
 
-export function appendAudit(entry: AuditEntry): void {
-  const { auditFile } = getPaths();
-  appendFileSync(auditFile, JSON.stringify(entry) + "\n");
+export function readAudit(jobName?: string, limit = 10): AuditEntry[] {
+  const { cronAudit } = getPaths();
+  if (!existsSync(cronAudit)) return [];
+
+  const lines = readFileSync(cronAudit, "utf8").trim().split("\n").filter(Boolean);
+  let entries: AuditEntry[] = [];
+  for (const line of lines) {
+    try {
+      entries.push(JSON.parse(line));
+    } catch {
+      // skip malformed
+    }
+  }
+
+  if (jobName) {
+    entries = entries.filter((e) => e.job === jobName);
+  }
+
+  return entries.slice(-limit);
 }

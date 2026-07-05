@@ -1,61 +1,73 @@
-import { getConfig } from "../../utils/config";
-import { getWatchBehavior, parseWatchKey } from "../../utils/watches";
+/**
+ * Slack watch channels: hot-reloads `channels.slack.watch` entries from
+ * config.yaml (plus any behavior files they reference) on each inbound
+ * message, gated by an mtime check so we don't re-parse config on every
+ * call. Keyed by `channel_id` (the part before `#` in the config key).
+ */
+import { statSync } from "fs";
+import { getConfig, resetConfig } from "../../utils/config";
+import { getPaths } from "../../utils/paths";
 import { log } from "../../utils/log";
-import { createChatEngine } from "../../chat/engine";
-import { getMcpServers } from "../../mcp";
+import { resolveWatchBehavior } from "../../utils/watches";
 
-export interface WatchMessage {
-  channelId: string;
-  channelName: string;
-  userId: string;
-  text: string;
-  ts: string;
+export interface WatchEntry {
+  name: string;
+  behavior: string;
 }
 
-export async function handleWatchMessage(msg: WatchMessage): Promise<void> {
-  const config = getConfig();
-  const watches = config.channels.slack.watch;
-  if (!watches) return;
+function maxMtime(paths: string[]): number {
+  let max = 0;
+  for (const p of paths) {
+    try {
+      const m = statSync(p).mtimeMs;
+      if (m > max) max = m;
+    } catch {
+      // missing file — ignore
+    }
+  }
+  return max;
+}
 
-  for (const [key, watchConfig] of Object.entries(watches)) {
-    const wc = watchConfig as { enabled?: boolean; behavior?: string };
-    if (!wc.enabled) continue;
+export class SlackWatchReloader {
+  private cache = new Map<string, WatchEntry>();
+  private filePaths: string[] = [];
+  private lastReloadMtime = 0;
 
-    const { channelId } = parseWatchKey(key);
-    if (channelId !== msg.channelId) continue;
+  /** Re-parse config + behavior files if any have been modified since the last read. */
+  reload(): Map<string, WatchEntry> {
+    const configPath = getPaths().config;
+    const mtime = maxMtime([configPath, ...this.filePaths]);
+    if (mtime === 0) return this.cache;
+    if (mtime === this.lastReloadMtime) return this.cache;
 
-    const behavior = getWatchBehavior(msg.channelName, wc.behavior);
-    if (!behavior) continue;
+    resetConfig();
+    const watch = getConfig().channels.slack.watch;
+    const fresh = new Map<string, WatchEntry>();
+    const freshFiles: string[] = [];
 
-    log.info({ channel: msg.channelName, user: msg.userId }, "watch channel message");
-
-    const room = `watch-${key}`;
-    const engine = await createChatEngine({
-      room,
-      channel: "slack",
-      resume: false,
-      mcpServers: getMcpServers({ channel: "slack", room, slackChannelId: msg.channelId, slackThreadTs: msg.ts }),
-      watchBehavior: { channel: msg.channelName, behavior },
-    });
-
-    const result = await engine.send(msg.text);
-    await engine.close();
-
-    if (result.result && result.result !== "[NO_REPLY]") {
-      try {
-        const { default: SlackApp } = await import("@slack/bolt");
-        const token = config.channels.slack.bot_token;
-        if (token) {
-          const client = new SlackApp({ token, signingSecret: "" }).client;
-          await client.chat.postMessage({
-            channel: msg.channelId,
-            text: result.result,
-            thread_ts: msg.ts,
-          });
+    if (watch) {
+      for (const [key, entry] of Object.entries(watch)) {
+        if (!entry.enabled) continue;
+        const hashIdx = key.indexOf("#");
+        if (hashIdx === -1) {
+          log.warn({ channel: key }, "slack: watch key must use channel_id#name format, skipping");
+          continue;
         }
-      } catch (err) {
-        log.error({ err }, "watch reply failed");
+        const id = key.slice(0, hashIdx);
+        const name = key.slice(hashIdx + 1);
+        const resolved = resolveWatchBehavior(entry.behavior, name);
+        if (resolved.filePath) freshFiles.push(resolved.filePath);
+        fresh.set(id, { name, behavior: resolved.behavior });
       }
     }
+
+    if (fresh.size !== this.cache.size) {
+      log.info({ count: fresh.size }, "slack: watch channels reloaded");
+    }
+
+    this.cache = fresh;
+    this.filePaths = freshFiles;
+    this.lastReloadMtime = maxMtime([configPath, ...freshFiles]);
+    return this.cache;
   }
 }

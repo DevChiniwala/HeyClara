@@ -1,293 +1,163 @@
-# HeyClara
+# clara
 
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Runtime](https://img.shields.io/badge/runtime-Bun.js-ff69b4)](https://bun.sh)
-[![AI](https://img.shields.io/badge/AI-Claude%20Agent%20SDK-8A2BE2)](https://github.com/anthropics/claude-agent-sdk)
+[![npm version](https://img.shields.io/npm/v/heyclara.svg)](https://www.npmjs.com/package/heyclara)
+[![npm downloads](https://img.shields.io/npm/dm/heyclara.svg)](https://www.npmjs.com/package/heyclara)
+[![license](https://img.shields.io/npm/l/heyclara.svg)](https://github.com/onlyoneaman/heyclara/blob/main/LICENSE)
 
-> **Your personal AI assistant daemon.** Chat via Telegram or Slack, run scheduled jobs, manage a persona system with on-demand memory — all powered by a single well-prompted Claude agent with tools.
+A personal AI agent you fork and make your own. Small enough to understand, built for one user. Powered by Claude Agent SDK.
 
-**CLI command:** `clara`
-**npm package:** `heyclara`
-**Config directory:** `~/.clara/`
-
----
+- npm package: [`heyclara`](https://www.npmjs.com/package/heyclara)
+- CLI command: `clara`
+- Website: [heyclara.com](https://heyclara.com)
 
 ## Philosophy
 
-### Single-Agent System
+**Small enough to understand.** One process, a few source files. No microservices, no message queues, no abstraction layers. Have Claude Code walk you through it.
 
-HeyClara uses **one** agent (Clara) equipped with excellent tools. No multi-agent swarm, no complex orchestration — just a focused agent that knows when to use MCP tools and when to think. This keeps the system predictable, debuggable, and cost-effective.
+**Built for one user.** This isn't a framework. It's working software that fits your exact needs. You fork it and have Claude Code make it match your exact needs.
 
-### Atomic Tools (MCP)
+**Customization = code changes.** No configuration sprawl. Want different behavior? Modify the code. The codebase is small enough that this is safe.
 
-**One tool = one side effect.** Tools return structured data; Clara decides what to do with it. Workflows are never hardcoded into the tools themselves — the agent composes them at runtime based on context.
+**AI-native.** No installation wizard; Claude Code guides setup. No monitoring dashboard; ask Claude what's happening. No debugging tools; describe the problem, Claude fixes it.
 
-### UI Parity
+**Skills over features.** Contributors shouldn't add features to the codebase. Instead, they contribute claude code skills like `/add-discord` that transform your fork. You end up with clean code that does exactly what you need.
 
-Whatever you can do through the CLI (`clara job add`, `clara config set`, etc.), Clara can achieve through its MCP tools. This means Clara can manage herself — she can add jobs, update config, check her own status, and save memories without you touching the terminal.
-
-### Harness-Agnostic Backends
-
-The system supports seamless provider-down failover. If Claude returns persistent 5xx errors, Clara automatically falls back to Codex (or any configured secondary backend) to complete the current task. No dropped messages, no stalled jobs.
-
-### Fail Forward Error Handling
-
-Errors are returned as structured data to the agent, never swallowed. Clara can inspect what went wrong, retry with a different approach, or explain the failure to you — she never silently crashes.
-
----
-
-## Architecture
-
-```
-~/.clara/
-├── config.yaml          # Database, channels, model, timezone, API keys
-├── self/
-│   ├── identity.md      # Agent personality and voice
-│   ├── owner.md         # Who runs this agent
-│   ├── soul.md          # How the agent works
-│   ├── rules.md         # Behavioral instructions (loaded every session)
-│   ├── memory.md        # Persistent facts and context (loaded every session)
-│   └── staging.md       # Candidate memories awaiting review
-├── jobs/                # Per-job prompt.md, working memory, state.md
-├── images/
-│   ├── profile.webp     # Profile picture for Telegram/Slack
-│   └── reference.webp   # Visual identity reference
-└── tmp/
-    ├── clara.pid
-    ├── daemon.log
-    └── cron-state.json
-```
-
-### Data Flow
-
-```
-Telegram / Slack / Terminal
-        │
-        ▼
-  ┌─────────────┐     ┌──────────┐     ┌────────────────┐
-  │  CLI Entry   │────▶│  Daemon  │────▶│  Agent Runner  │
-  │  (Commander) │     │  Loop    │     │  (failover)    │
-  └─────────────┘     └──────────┘     └───────┬────────┘
-        │                                       │
-        ▼                                       ▼
-  ┌─────────────┐                      ┌────────────────┐
-  │  Channels   │                      │  Agent Backend  │
-  │  (Telegram  │                      │  (Claude/Codex) │
-  │   /Slack)   │                      └────────┬───────┘
-  └─────────────┘                               │
-        │                                       ▼
-        ▼                               ┌────────────────┐
-  ┌─────────────┐                       │  MCP Tools     │
-  │  PostgreSQL │                       │  (in-process)  │
-  │  (DB)       │                       └────────────────┘
-  └─────────────┘
-```
-
----
+**Best harness, best model.** This runs on Claude Agent SDK, which means you're running Claude Code directly. The harness matters. A bad harness makes even smart models seem dumb, a good harness gives them superpowers.
 
 ## Quick Start
 
-### Prerequisites
-
-- [Bun](https://bun.sh) runtime (≥ 1.0)
-- PostgreSQL (14+)
-- Anthropic API key ([console.anthropic.com](https://console.anthropic.com))
-
-### Installation
-
 ```bash
-# Install globally
-npm i -g heyclara
-
-# Run setup wizard
-clara init
-
-# Start the daemon
-clara start
+npm i -g heyclara        # installs globally (prompts to install Bun if missing)
+clara init                # guided setup (database, channels, persona, visual identity)
+clara start               # starts daemon + registers OS service
 ```
 
-### Without npm (development)
+## What It Supports
 
-```bash
-# Clone and install
-git clone https://github.com/DevChiniwala/HeyClara.git
-cd HeyClara
-bun install
-
-# Run
-bun start
-```
-
----
+- **Telegram** — message your agent from your phone, typing indicator while processing
+- **Slack** — Socket Mode bot with thread awareness, thinking emoji, watch channels for proactive monitoring
+- **Phone (voice)** — Twilio + OpenAI Realtime. Inbound calls from allowlisted contacts and outbound calls via `place_call` MCP tool. Scheduled jobs can dial you (morning standup, evening retro, escalation). See `/clara-phone` skill.
+- **SMS** — Twilio Messaging on the same number. Inbound webhook → chat engine → REST reply. Reachability fallback when data is unavailable but cellular works (treks, basements, patchy zones).
+- **WhatsApp** — Twilio Sandbox by default (production WABA when policy permits). Rich messaging with `whatsapp:` prefix. Enforces Meta's 24-hour customer-service window.
+- **Terminal chat** — REPL with session resume support
+- **Scheduled jobs** — recurring jobs and crons that run Claude and can message you back. Stateful by default (working memory), per-job model routing for cost savings
+- **Persona system** — customizable identity, soul, owner profile, rules, and memory (preloaded every session)
+- **Agents** — domain specialists (marketer, senior-dev) via Claude Agent SDK subagents
+- **Skills** — loads skills from multiple directories, invokable as slash commands
+- **Cross-platform service** — launchd (macOS), systemd (Linux), service-aware restart
+- **MCP tools** — 21 tools for job management, messaging, memory, rules, channel control, and outbound phone calls
+- **Background memory consolidation** — stages memory candidates from conversations automatically
+- **Session summaries** — optional handoff notes between sessions for continuity
+- **Backups** — `clara backup` with auto-backup before updates
+- **Optional integrations** — add Gmail, Discord, and more via skills
 
 ## Commands
 
-### Daemon
-| Command | Description |
-|---------|-------------|
-| `clara start` | Start daemon + register OS service |
-| `clara stop` | Stop daemon (guards active engines) |
-| `clara restart` | Restart daemon |
-| `clara status` | Show daemon, jobs, channels, chat rooms |
-| `clara health` | Check daemon, DB, channels, config |
-| `clara logs [-f]` | View daemon logs (follow with `-f`) |
+```
+clara init                       — interactive setup (db, channels, persona, agents, active hours)
+clara start / stop               — daemon + OS service (launchd/systemd)
+clara restart                    — restart daemon (service-aware)
+clara status                     — show daemon, jobs, channels, chat rooms
+clara active [--full]            — show active engine count or details
+clara model [name]               — show or set global Claude model
+clara health                     — check daemon, db, channels, config
+clara chat [-c|-r] [--channel ch] — terminal chat (new by default, -c continue, -r pick)
+clara run <prompt>               — one-shot prompt execution
+clara history [room]             — recent messages
+clara logs [-f] [--channel ch]   — daemon logs (follow with -f, filter by channel)
+clara send [-c channel] <msg>    — send a message via channel
+clara version                    — show version
+clara update                     — update to latest version (auto-backup + restart)
 
-### Chat
-| Command | Description |
-|---------|-------------|
-| `clara chat` | Interactive terminal chat |
-| `clara chat -c` | Continue last session |
-| `clara run <prompt>` | One-shot prompt execution |
-| `clara history [room]` | Recent messages |
-| `clara send <msg>` | Send a message via default channel |
+clara job list                   — list all jobs
+clara job show [name]            — full details + recent runs
+clara job status [name]          — quick status check
+clara job add <n> <s> <p>        — add a job (--type, --always, --agent, --model, --stateless, --prompt-file)
+clara job update <name>          — update a job (--schedule, --prompt, --prompt-file, --type, --always, --agent, --model, --stateless)
+clara job remove <name>          — delete a job
+clara job enable / disable <n>   — toggle a job
+clara job run <name>             — run a job once
+clara job log [name]             — show recent run history
 
-### Jobs
-| Command | Description |
-|---------|-------------|
-| `clara job list` | List all scheduled jobs |
-| `clara job add <name> <schedule> <prompt>` | Create a new job |
-| `clara job show <name>` | Show job details + recent runs |
-| `clara job update <name>` | Update job fields |
-| `clara job remove <name>` | Delete a job |
-| `clara job run <name>` | Execute a job immediately |
-| `clara job enable/disable <name>` | Toggle job |
+clara rules [show|reset]         — view or reset rules.md
+clara memory [show|reset]        — view or reset memory.md
+clara agent list                 — list available agents
+clara agent show <name>          — show agent details and prompt
+clara skills [source]            — list available skills
 
-### Persona
-| Command | Description |
-|---------|-------------|
-| `clara rules [show\|reset]` | View or reset rules.md |
-| `clara memory [show\|reset]` | View or reset memory.md |
-| `clara agent list` | List available agents |
-| `clara skills [source]` | List available skills |
+clara channels                   — show channel status (on/off)
+clara channels on / off          — enable/disable all channels (applied via SIGHUP, no restart)
+clara channels off telegram      — disable one channel without removing its token
+clara watch list                 — list Slack watch channels
+clara watch add/remove/enable/disable — manage watch channels
 
-### Config
-| Command | Description |
-|---------|-------------|
-| `clara config list` | Show all configuration |
-| `clara config get <key>` | Get a config value (dot notation) |
-| `clara config set <key> <value>` | Set a config value |
-| `clara validate` | Validate config.yaml |
+clara config list                — show all config
+clara config get <key>           — get a config value (dot notation supported)
+clara config set <key> <value>   — set a config value
+clara validate                   — validate config.yaml
+clara backup [list]              — create or list backups
+clara test [-v]                  — run tests
 
-### System
-| Command | Description |
-|---------|-------------|
-| `clara init` | Interactive setup wizard |
-| `clara db setup` | Install + create database |
-| `clara db migrate` | Run database migrations |
-| `clara test` | Run tests |
-| `clara version` | Show version |
+clara db setup                   — install PostgreSQL + create database + migrate
+clara db migrate                 — run database migrations
+clara db status                  — check database connection
+```
 
----
+## Architecture
 
-## Configuration
+All config and data lives in `~/.heyclara/`:
 
-HeyClara reads from `~/.clara/config.yaml` with environment variable overrides:
+```
+~/.heyclara/
+  config.yaml       — database, channels, model, timezone, active hours, API keys
+  self/
+    identity.md     — agent personality and voice
+    owner.md        — who runs this agent
+    soul.md         — how the agent works
+    rules.md        — behavioral instructions (loaded every session)
+    memory.md       — persistent facts and context (loaded every session)
+  jobs/               — per-job prompt.md, working memory, and state (auto-created)
+  optimizations/      — optimization loop run workspaces
+  images/
+    reference.webp  — visual identity reference image
+    profile.webp    — profile picture for Telegram/Slack
+  tmp/
+    clara.pid, daemon.log, cron-state.json, cron-audit.jsonl
+```
+
+Post-session background LLM work can be disabled in `config.yaml`:
 
 ```yaml
-model: default
-runner: claude
-fallback: [codex]
-timezone: America/New_York
-active_hours:
-  start: "09:00"
-  end: "02:00"     # Supports midnight-crossing windows
-database_url: postgres://localhost:5432/clara
-log_level: info
-
-channels:
-  enabled: true
-  default: telegram
-  telegram:
-    enabled: true
-    bot_token: ...          # Or TELEGRAM_BOT_TOKEN env
-    chat_id: 123456789      # Or TELEGRAM_CHAT_ID env
-  slack:
-    enabled: true
-    bot_token: ...          # Or SLACK_BOT_TOKEN env
-    app_token: ...          # Or SLACK_APP_TOKEN env
-    dm_user_id: ...         # Or SLACK_DM_USER_ID env
-
 session_finalization:
   enabled: true
   memory_consolidation: true
   summaries: true
 ```
 
----
+Use `clara config set session_finalization.memory_consolidation false` to stop memory staging, `clara config set session_finalization.summaries false` to stop session summaries, or `clara config set session_finalization.enabled false` to disable both.
 
-## What It Supports
+## Contributing
 
-- **Telegram** — Message Clara from your phone, typing indicator while processing
-- **Slack** — Socket Mode bot with thread awareness, thinking emoji, watch channels for proactive monitoring
-- **SMS (Twilio)** — Inbound/outbound text messaging
-- **WhatsApp (Twilio)** — Rich messaging with Meta's 24-hour window compliance
-- **Terminal chat** — REPL with session resume support
-- **Scheduled jobs** — Cron, interval, and one-shot jobs with active hours and per-job model routing
-- **Persona system** — Customizable identity, soul, owner profile, rules, and memory
-- **Agents** — Domain specialists (marketer, senior-dev) via Claude subagents
-- **Skills** — Extend Clara by adding skill directories with `SKILL.md` manifests
-- **MCP tools** — 20+ tools for job management, messaging, memory, rules, and channel control
-- **Background memory consolidation** — Automatic memory candidate extraction from conversations
-- **Session summaries** — Optional handoff notes between sessions
-- **Cross-platform service** — launchd (macOS), systemd (Linux)
-- **Backup** — `clara backup` with pre-update auto-backup
+**Don't add features. Add skills.**
 
----
+If you want to add Discord support, don't create a PR that adds Discord alongside Telegram. Instead, contribute a skill folder (`skills/add-discord/SKILL.md`) that teaches Claude Code how to transform a clara installation to use Discord.
 
-## Skills
+Users then run `/add-discord` on their fork and get clean code that does exactly what they need, not a bloated system trying to support every use case.
 
-Skills are a directory-based extension system. Contributors create a folder with a `SKILL.md` that teaches Clara (or Claude Code) how to integrate new capabilities:
+## Requirements
 
-```
-skills/add-discord/
-├── SKILL.md           # What this skill does and how to install it
-└── ...                # Templates, scripts, reference files
-```
+- [Bun](https://bun.sh) runtime (auto-installed if missing)
+- PostgreSQL (`clara db setup` handles installation)
+- Claude API access (via `@anthropic-ai/claude-agent-sdk`)
+- Gemini API key (optional, for image generation — `clara config set gemini_api_key ...`)
+- OpenAI API key (optional, for image generation — `clara config set openai_api_key ...`)
 
-Users run the skill via Clara, and it transforms their installation with clean, purpose-built code — no feature bloat.
-
----
-
-## Development
+## Updating
 
 ```bash
-# Install dependencies
-bun install
-
-# Type-check
-bun run typecheck
-
-# Run tests
-bun test
-
-# Check for circular imports
-bun run check:cycles
+clara update               # auto-backup, install latest, restart daemon
 ```
-
-### Project Structure
-
-```
-src/
-├── cli/           # Commander entry points
-├── core/          # Daemon lifecycle, runner, scheduler
-├── agent/         # Backend adapters (Claude, Codex)
-├── db/            # PostgreSQL schema, migrations, models
-├── channels/      # Telegram, Slack, Twilio integrations
-├── mcp/           # MCP tool definitions and server
-├── prompts/       # System prompt templates
-├── types/         # TypeScript + Zod type definitions
-└── utils/         # Config, logging, path resolution
-```
-
----
-
-## License
-
-MIT
-
----
 
 ## Author
 
-**Dev Chiniwala**
-- GitHub: [@DevChiniwala](https://github.com/DevChiniwala)
+Aman ([amankumar.ai](https://amankumar.ai))

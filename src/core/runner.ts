@@ -1,30 +1,57 @@
-import { existsSync } from "fs";
 import { homedir } from "os";
-import { log } from "../utils/log";
+import { existsSync } from "fs";
+import { randomUUID } from "crypto";
+import type { JobInput, JobResult } from "../types";
+import { appendAudit, readState, writeState } from "../utils/logger";
+import type { AuditEntry, JobState } from "../types";
 import { getConfig } from "../utils/config";
-import { getBackend, resolveBackends } from "../agent/registry";
-import type { AgentBackend, AgentSession, AgentSessionContext, RunnerOutput } from "../agent/types";
-import type { JobRow } from "../db/models/job";
-import { ActiveEngine } from "../db/models";
 import { buildSystemPrompt, buildContextSuffix } from "../chat/identity";
 import { buildEmployeePrompt } from "../chat/employee-prompt";
 import { getEmployee } from "./employees";
 import { scanAgents } from "./agents";
 import { buildJobPrompt } from "./job-prompt";
-import { appendAudit, readState, writeState } from "../utils/logger";
-import type { JobResult, ActivityCallback } from "../types/engine";
-import type { AuditEntry, JobState } from "../types/audit";
-import type { McpSourceContext } from "../mcp";
-import { getMcpServers } from "../mcp";
+import { getMcpServers, type McpSourceContext } from "../mcp";
+import { ActiveEngine } from "../db/models";
+import { log } from "../utils/log";
+import { registerActiveHandle, unregisterActiveHandle } from "./active-handles";
+import { getBackend, resolveBackends, type AgentBackend, type AgentSession, type AgentSessionContext } from "../agent";
+
+export { buildWorkingMemory } from "./job-prompt";
+
+export type ActivityCallback = (line: string) => void;
+
+interface RunnerOutput {
+  agentText: string;
+  sessionId: string;
+  terminalReason?: string;
+  error?: string;
+  /** The backend reported provider-down — caller may fail over to the next backend. */
+  providerDown?: boolean;
+}
+
+// ---------------------------------------------------------------------------
+// Shared backend run consumer
+// ---------------------------------------------------------------------------
 
 /**
- * Consume an agent session's event stream and return structured output.
+ * Drive one backend session to a `RunnerOutput`: map `AgentEvent`s to activity +
+ * result/error, and handle abort. Shared by the Claude and Codex job paths so
+ * the consume logic lives in exactly one place.
  */
 async function consumeBackendRun(
   session: AgentSession,
   prompt: string,
   onActivity?: ActivityCallback,
+  activeRoom?: string,
 ): Promise<RunnerOutput> {
+  let abortReason: string | null = null;
+  if (activeRoom) {
+    registerActiveHandle(activeRoom, (reason) => {
+      abortReason = reason;
+      session.abort(reason);
+    });
+  }
+
   let agentText = "";
   let terminalReason: string | undefined;
   let error: string | undefined;
@@ -32,33 +59,34 @@ async function consumeBackendRun(
 
   try {
     for await (const ev of session.send(prompt)) {
-      switch (ev.type) {
-        case "thinking":
-          onActivity?.(ev.delta);
-          break;
-        case "tool":
-          onActivity?.(ev.summary ?? ev.name);
-          break;
-        case "result":
-          agentText = ev.text;
-          terminalReason = ev.terminalReason;
-          break;
-        case "error":
-          error = ev.message;
-          terminalReason = ev.terminalReason;
-          providerDown = ev.providerDown;
-          break;
+      if (ev.type === "thinking") onActivity?.(ev.delta);
+      else if (ev.type === "tool") onActivity?.(ev.summary ?? ev.name);
+      else if (ev.type === "result") {
+        agentText = ev.text;
+        terminalReason = ev.terminalReason;
+      } else if (ev.type === "error") {
+        error = ev.message;
+        terminalReason = ev.terminalReason;
+        providerDown = ev.providerDown;
       }
     }
   } catch (err) {
-    return {
-      agentText: "",
-      sessionId: session.backendSessionId ?? "",
-      terminalReason: "aborted",
-      error: err instanceof Error ? err.message : String(err),
-    };
+    if (abortReason) {
+      return {
+        agentText: "",
+        sessionId: session.backendSessionId ?? "",
+        terminalReason: "aborted",
+        error: abortReason,
+      };
+    }
+    throw err;
   } finally {
     await session.close();
+    if (activeRoom) unregisterActiveHandle(activeRoom);
+  }
+
+  if (abortReason) {
+    return { agentText: "", sessionId: session.backendSessionId ?? "", terminalReason: "aborted", error: abortReason };
   }
 
   return { agentText, sessionId: session.backendSessionId ?? "", terminalReason, error, providerDown };
@@ -66,19 +94,21 @@ async function consumeBackendRun(
 
 /**
  * Run a job across the ordered backend chain: try the primary, and on a
- * provider-down result fail over to the next backend, replaying the same prompt.
+ * provider-down result fail over to the next backend (replaying the same prompt;
+ * continuity comes from Clara's own context, not a cross-backend session resume).
  */
 export async function runJobAcrossBackends(
   backends: AgentBackend[],
   sessionCtx: AgentSessionContext,
   jobPrompt: string,
   onActivity?: ActivityCallback,
+  activeRoom?: string,
 ): Promise<RunnerOutput> {
   let output: RunnerOutput = { agentText: "", sessionId: "", error: "no backend configured" };
   for (let i = 0; i < backends.length; i++) {
     const backend = backends[i]!;
     const session = await backend.openSession(sessionCtx);
-    output = await consumeBackendRun(session, jobPrompt, onActivity);
+    output = await consumeBackendRun(session, jobPrompt, onActivity, activeRoom);
     if (!output.providerDown) return output;
     const next = backends[i + 1];
     if (next) log.warn({ from: backend.name, to: next.name }, "provider down, failing over to next backend");
@@ -87,49 +117,77 @@ export async function runJobAcrossBackends(
 }
 
 /**
- * One-shot job on the default backend.
+ * Run a one-shot job on the in-process Claude backend. Kept as a named export
+ * (signature stable) because `alive.ts` and `runTask` call it directly.
  */
-export async function runJobWithBackend(
+export async function runJobWithClaude(
   systemPrompt: string,
   jobPrompt: string,
-  cwd: string = homedir(),
+  cwd: string,
   onActivity?: ActivityCallback,
   model?: string,
-  source?: Record<string, unknown>,
+  sourceCtx?: McpSourceContext,
+  activeRoom?: string,
 ): Promise<RunnerOutput> {
+  const mcpServers = (getMcpServers(sourceCtx) as Record<string, unknown> | undefined) ?? undefined;
   const session = await getBackend().openSession({
-    room: `_oneshot/${crypto.randomUUID()}`,
+    room: activeRoom ?? `_oneshot/${randomUUID()}`,
     channel: "system",
     systemPrompt,
     cwd,
     model,
-    source,
+    mcpServers,
+    source: sourceCtx,
     resume: false,
   });
-  return consumeBackendRun(session, jobPrompt, onActivity);
+  return consumeBackendRun(session, jobPrompt, onActivity, activeRoom);
+}
+
+// ---------------------------------------------------------------------------
+// Background task runner — tracked one-shot agent with full Clara personality
+// ---------------------------------------------------------------------------
+
+export interface TaskOptions {
+  /** Task name — used for ActiveEngine tracking as _system/{name}. */
+  name: string;
+  /** The prompt/instruction for the task. */
+  prompt: string;
+  /** System prompt override. Defaults to buildSystemPrompt("job"). */
+  systemPrompt?: string;
 }
 
 /**
- * Run with failover across all configured backends.
+ * Run a background agent task with ActiveEngine tracking and MCP tools.
+ * Use for consolidator, summarizer, and any future background work.
  */
-export async function runWithFailover(
-  sessionCtx: AgentSessionContext,
-  prompt: string,
-  onActivity?: ActivityCallback,
-): Promise<RunnerOutput> {
-  return runJobAcrossBackends(resolveBackends(), sessionCtx, prompt, onActivity);
+export async function runTask(opts: TaskOptions): Promise<RunnerOutput> {
+  const room = `_system/${opts.name}`;
+  await ActiveEngine.register(room, "system").catch(() => {});
+  try {
+    const systemPrompt = opts.systemPrompt || buildSystemPrompt("job");
+    const output = await runJobWithClaude(systemPrompt, opts.prompt, homedir(), undefined, undefined, undefined, room);
+    if (output.error) {
+      log.error({ task: opts.name, error: output.error }, "task failed");
+    } else {
+      log.info({ task: opts.name, resultChars: output.agentText.length }, "task completed");
+    }
+    return output;
+  } finally {
+    await ActiveEngine.unregister(room).catch(() => {});
+  }
 }
 
-/**
- * Full job execution pipeline. Builds the system prompt, resolves the job
- * prompt, runs across the backend chain, records audit, and updates state.
- */
-export async function runJob(job: JobRow, onActivity?: ActivityCallback): Promise<JobResult> {
+// ---------------------------------------------------------------------------
+// Public API
+// ---------------------------------------------------------------------------
+
+export async function runJob(job: JobInput, onActivity?: ActivityCallback): Promise<JobResult> {
   const config = getConfig();
   const timestamp = new Date().toISOString();
   const startMs = performance.now();
   const room = `job/${job.name}`;
 
+  // Update state: running
   const state: Record<string, JobState> = { ...readState() };
   state[job.name] = { lastRun: timestamp, status: "running", duration_ms: 0 };
   writeState(state);
@@ -137,12 +195,18 @@ export async function runJob(job: JobRow, onActivity?: ActivityCallback): Promis
 
   try {
     let cwd = homedir();
+    let output: RunnerOutput;
+
+    // Resolve system prompt: employee > agent > default
     let systemPrompt: string;
     let agentModel: string | undefined;
-
     if (job.employee) {
       const empPrompt = buildEmployeePrompt(job.employee, "job");
-      systemPrompt = empPrompt || buildSystemPrompt("job");
+      if (empPrompt) {
+        systemPrompt = empPrompt;
+      } else {
+        systemPrompt = buildSystemPrompt("job");
+      }
       const emp = getEmployee(job.employee);
       if (emp?.model) agentModel = emp.model;
       if (emp?.repo && existsSync(emp.repo)) cwd = emp.repo;
@@ -159,22 +223,28 @@ export async function runJob(job: JobRow, onActivity?: ActivityCallback): Promis
       systemPrompt = buildSystemPrompt("job");
     }
 
-    const prompt = buildJobPrompt(job);
+    const jobPrompt = buildJobPrompt(job);
+
+    // Model priority: job.model > agent.model > config.model
     const resolvedModel = job.model || agentModel || config.model;
 
-    const jobSourceCtx: Record<string, unknown> = { jobName: job.name, channel: "system" };
+    const jobSourceCtx: McpSourceContext = { jobName: job.name, channel: "system" };
 
+    // One context serves every backend: Claude uses the pre-built in-process
+    // mcpServers; Codex/Gemini use `source` to wire the loopback endpoint. Run
+    // across the configured backend chain so a provider-down primary fails over.
     const sessionCtx: AgentSessionContext = {
       room,
       channel: "system",
       systemPrompt,
       cwd,
       model: resolvedModel,
+      mcpServers: (getMcpServers(jobSourceCtx) as Record<string, unknown> | undefined) ?? undefined,
       source: jobSourceCtx,
       resume: false,
     };
+    output = await runJobAcrossBackends(resolveBackends(), sessionCtx, jobPrompt, onActivity, room);
 
-    const output = await runJobAcrossBackends(resolveBackends(), sessionCtx, prompt, onActivity);
     const duration_ms = Math.round(performance.now() - startMs);
     const ok = !output.error;
 
@@ -201,6 +271,7 @@ export async function runJob(job: JobRow, onActivity?: ActivityCallback): Promis
     };
     appendAudit(auditEntry);
 
+    // Re-read state to avoid clobbering concurrent job updates
     const freshState = { ...readState() };
     freshState[job.name] = {
       lastRun: timestamp,
@@ -225,12 +296,22 @@ export async function runJob(job: JobRow, onActivity?: ActivityCallback): Promis
     };
 
     appendAudit({
-      job: result.job, timestamp: result.timestamp, status: "error",
-      result: "", duration_ms, error: errorMsg,
+      job: result.job,
+      timestamp: result.timestamp,
+      status: "error",
+      result: "",
+      duration_ms,
+      error: errorMsg,
     });
 
+    // Re-read state to avoid clobbering concurrent job updates
     const freshState = { ...readState() };
-    freshState[job.name] = { lastRun: timestamp, status: "error", duration_ms, error: errorMsg };
+    freshState[job.name] = {
+      lastRun: timestamp,
+      status: "error",
+      duration_ms,
+      error: errorMsg,
+    };
     writeState(freshState);
 
     return result;

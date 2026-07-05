@@ -1,61 +1,116 @@
-import { existsSync, readFileSync, writeFileSync } from "fs";
+import { existsSync, readFileSync, readdirSync } from "fs";
+import { join } from "path";
 import yaml from "js-yaml";
-import { getPaths } from "../utils/paths";
+import { getNiaHome } from "../utils/paths";
+import { log } from "../utils/log";
 import type { EmployeeInfo } from "../types/employee";
 
-const EMPLOYEES_FILE = "employees.yaml";
-
-function employeesPath(): string {
-  return `${getPaths().home}/${EMPLOYEES_FILE}`;
+function getEmployeesDir(): string {
+  return join(getNiaHome(), "employees");
 }
 
-function loadEmployees(): EmployeeInfo[] {
-  const path = employeesPath();
-  if (!existsSync(path)) return [];
-  try {
-    const doc = yaml.load(readFileSync(path, "utf8"));
-    if (Array.isArray(doc)) return doc as EmployeeInfo[];
-    return [];
-  } catch {
-    return [];
+export function scanEmployees(): EmployeeInfo[] {
+  const employees: EmployeeInfo[] = [];
+  const dir = getEmployeesDir();
+  if (!existsSync(dir)) return employees;
+
+  const entries = readdirSync(dir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name));
+
+  for (const entry of entries) {
+    if (!entry.isDirectory() || entry.name.startsWith(".")) continue;
+
+    const empFile = join(dir, entry.name, "EMPLOYEE.md");
+    if (!existsSync(empFile)) continue;
+
+    const content = readFileSync(empFile, "utf8");
+    const fmMatch = content.match(/^---\n([\s\S]*?)\n---/);
+    if (!fmMatch) continue;
+
+    let meta: Record<string, unknown> = {};
+    try {
+      meta = (yaml.load(fmMatch[1]) as Record<string, unknown>) || {};
+    } catch (err) {
+      log.warn({ err, employee: entry.name, path: empFile }, "failed to parse employee metadata, skipping");
+      continue;
+    }
+
+    const name = (typeof meta.name === "string" ? meta.name : "") || entry.name;
+    const body = content.replace(/^---\n[\s\S]*?\n---\n*/, "").trim();
+
+    employees.push({
+      name,
+      dirName: entry.name,
+      project: typeof meta.project === "string" ? meta.project : "",
+      repo: typeof meta.repo === "string" ? meta.repo : "",
+      role: typeof meta.role === "string" ? meta.role : "Employee",
+      model: typeof meta.model === "string" ? meta.model : undefined,
+      status:
+        meta.status === "onboarding" || meta.status === "active" || meta.status === "paused"
+          ? meta.status
+          : "onboarding",
+      maxSubEmployees: typeof meta.maxSubEmployees === "number" ? meta.maxSubEmployees : 3,
+      body,
+      created: typeof meta.created === "string" ? meta.created : new Date().toISOString().slice(0, 10),
+      parent: typeof meta.parent === "string" ? meta.parent : undefined,
+      source: "clara",
+    });
   }
-}
 
-function saveEmployees(employees: EmployeeInfo[]): void {
-  writeFileSync(employeesPath(), yaml.dump(employees, { lineWidth: -1 }));
+  return employees;
 }
 
 export function getEmployee(name: string): EmployeeInfo | undefined {
-  return loadEmployees().find((e) => e.name === name);
+  return scanEmployees().find((e) => e.name.toLowerCase() === name.toLowerCase());
 }
 
-export function listEmployees(): EmployeeInfo[] {
-  return loadEmployees();
-}
-
-export function addEmployee(emp: EmployeeInfo): void {
-  const employees = loadEmployees();
-  if (employees.some((e) => e.name === emp.name)) {
-    throw new Error(`Employee "${emp.name}" already exists`);
-  }
-  employees.push(emp);
-  saveEmployees(employees);
-}
-
-export function removeEmployee(name: string): boolean {
-  const employees = loadEmployees();
-  const idx = employees.findIndex((e) => e.name === name);
-  if (idx === -1) return false;
-  employees.splice(idx, 1);
-  saveEmployees(employees);
-  return true;
+export function getEmployeeDir(name: string): string {
+  // Look up actual directory — name in frontmatter may differ from dir name
+  const emp = scanEmployees().find((e) => e.name.toLowerCase() === name.toLowerCase());
+  if (emp) return join(getEmployeesDir(), emp.dirName);
+  // Fallback for new employees being created (not yet on disk)
+  return join(getEmployeesDir(), name);
 }
 
 export function getEmployeesSummary(): string {
-  const employees = listEmployees();
+  const employees = scanEmployees();
   if (employees.length === 0) return "";
-  const lines = employees.map(
-    (e) => `- **${e.name}**: ${e.role} @ ${e.project}${e.model ? ` (model: ${e.model})` : ""}`,
-  );
-  return `## Employees\n${lines.join("\n")}`;
+  const lines = employees.map((e) => `- @${e.name}: ${e.role} — ${e.project || "(no project)"} [${e.status}]`);
+  return `Available employees:\n${lines.join("\n")}`;
 }
+
+export function listEmployeesForMcp(): string {
+  const employees = scanEmployees();
+  if (employees.length === 0) return "No employees found.";
+  return JSON.stringify(
+    employees.map((e) => ({
+      name: e.name,
+      role: e.role,
+      project: e.project,
+      repo: e.repo,
+      status: e.status,
+      model: e.model,
+    })),
+    null,
+    2,
+  );
+}
+
+/** Injected into employee prompt only when status=onboarding. */
+export const ONBOARDING_INSTRUCTIONS = `## Onboarding
+
+You are in onboarding status. Be proactive — don't wait for the user to drive. You're a co-founder getting up to speed, not an assistant being briefed.
+
+IMPORTANT: One thing at a time. Each message should focus on ONE step. Don't dump all steps on the user at once. Move to the next step only after the current one is resolved.
+
+During the brief, don't just record — challenge. Ask follow-up questions. If the vision sounds vague, say so. If the goals are unrealistic, push back. If something sounds like it matters more than what the user is focused on, flag it.
+
+### Steps (do these in order, one per message)
+1. **Identity** — If your name is a placeholder (starts with "new-employee"), suggest 3-4 real names and ask the user to pick. Update the name field in your EMPLOYEE.md frontmatter. Do NOT rename the directory — the system resolves it from frontmatter.
+2. **Project & Repo** — If project or repo are empty, ask what you'll be working on. Get the repo path. Update your EMPLOYEE.md.
+3. **Brief** — Ask the user about the project: goals, what's working, what's not, their vision. Save to onboarding/brief.md.
+4. **Self-Discovery** — Explore the repo autonomously. Read code, README, recent commits, deployment config. Save findings to onboarding/discovery.md. Report back to user for corrections.
+5. **Initial Plan** — Propose top 3-5 priorities with first actions for each. Save to onboarding/plan.md. Get user approval.
+
+After all steps are done, update your EMPLOYEE.md status from "onboarding" to "active".
+
+Skip any step where the info is already filled in.`;

@@ -1,52 +1,39 @@
 import { CronExpressionParser } from "cron-parser";
 import { parseDuration } from "./duration";
-import type { ScheduleType } from "../types/enums";
+import type { ScheduleType } from "../types";
 
-export function computeInitialNextRun(type: ScheduleType, schedule: string, timezone: string): Date | null {
-  if (type === "once") {
-    const d = new Date(schedule);
-    return isNaN(d.getTime()) ? null : d;
-  }
-
-  if (type === "cron") {
-    try {
-      const interval = CronExpressionParser.parse(schedule, { tz: timezone });
-      return interval.next().toDate();
-    } catch {
-      return null;
+export function computeNextRun(
+  scheduleType: ScheduleType,
+  schedule: string,
+  timezone: string,
+  lastRunAt?: Date,
+): Date | null {
+  switch (scheduleType) {
+    case "cron": {
+      const expr = CronExpressionParser.parse(schedule, { tz: timezone });
+      return expr.next().toDate();
     }
-  }
-
-  if (type === "interval") {
-    try {
-      return new Date(Date.now() + parseDuration(schedule));
-    } catch {
-      return null;
+    case "interval": {
+      const ms = parseDuration(schedule);
+      const base = lastRunAt || new Date();
+      return new Date(base.getTime() + ms);
     }
+    case "once":
+      return null;
   }
-
-  return null;
 }
 
-export function computeNextRun(type: ScheduleType, schedule: string, timezone: string, from: Date): Date | null {
-  if (type === "once") return null;
-
-  if (type === "cron") {
-    try {
-      const interval = CronExpressionParser.parse(schedule, { tz: timezone, currentDate: from });
-      return interval.next().toDate();
-    } catch {
-      return null;
+export function computeInitialNextRun(scheduleType: ScheduleType, schedule: string, timezone: string): Date {
+  switch (scheduleType) {
+    case "cron": {
+      const expr = CronExpressionParser.parse(schedule, { tz: timezone });
+      return expr.next().toDate();
     }
-  }
-
-  if (type === "interval") {
-    try {
-      return new Date(from.getTime() + parseDuration(schedule));
-    } catch {
-      return null;
+    case "interval": {
+      const ms = parseDuration(schedule);
+      return new Date(Date.now() + ms);
     }
+    case "once":
+      return new Date(schedule);
   }
-
-  return null;
 }

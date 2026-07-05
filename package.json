@@ -1,29 +1,20 @@
 {
   "name": "heyclara",
-  "version": "0.5.0",
-  "description": "A personal AI assistant daemon — chat, scheduled jobs, persona system, extensible via skills. Powered by Claude Agent SDK.",
+  "version": "0.4.2",
+  "description": "A personal AI assistant daemon — chat, scheduled jobs, persona system, extensible via skills.",
   "type": "module",
   "scripts": {
     "start": "bun run src/cli/index.ts start",
     "stop": "bun run src/cli/index.ts stop",
     "status": "bun run src/cli/index.ts status",
     "dev": "bun run src/cli/index.ts run",
-    "chat": "bun run src/cli/index.ts chat",
-    "test": "bun test",
+    "test": "tsc --noEmit && bun run check:cycles && LOG_LEVEL=silent bun test --reporter=dots",
+    "test:bun": "bun test",
     "typecheck": "tsc --noEmit",
-    "check:cycles": "madge --circular --extensions ts src/"
+    "check:cycles": "madge --circular --extensions ts src/",
+    "seed": "bun run src/db/seed.ts",
+    "release": "npm version patch && npm publish && git push"
   },
-  "bin": {
-    "clara": "bin/clara"
-  },
-  "files": [
-    "bin/",
-    "src/",
-    "defaults/",
-    "README.md",
-    "LICENSE",
-    "tsconfig.json"
-  ],
   "keywords": [
     "ai",
     "assistant",
@@ -32,12 +23,23 @@
     "telegram",
     "slack",
     "cron",
-    "claude",
-    "clara"
+    "claude"
   ],
   "engines": {
     "bun": ">=1.0.0"
   },
+  "bin": {
+    "clara": "bin/clara"
+  },
+  "files": [
+    "bin/",
+    "src/",
+    "defaults/",
+    "skills/",
+    "README.md",
+    "LICENSE",
+    "tsconfig.json"
+  ],
   "author": "Dev Chiniwala",
   "license": "MIT",
   "private": false,
@@ -46,7 +48,6 @@
     "@anthropic-ai/sdk": "^0.105.0",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@slack/bolt": "^4.6.0",
-    "commander": "^13.1.0",
     "cron-parser": "^5.5.0",
     "grammy": "^1.41.1",
     "js-yaml": "^4.1.1",

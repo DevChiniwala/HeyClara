@@ -1,105 +1,118 @@
-import { z } from "zod";
-import type { BackendName } from "./enums";
+export interface TelegramConfig {
+  enabled: boolean;
+  bot_token: string | null;
+  chat_id: number | null;
+  open: boolean;
+}
 
-const backendSchema = z.enum(["claude", "codex", "gemini"]);
+export interface SlackWatchChannel {
+  /**
+   * Optional. Three forms:
+   *   - omitted/empty: use the watch name (part after # in the key) as identity,
+   *     loads behavior from watches/<name>/behavior.md
+   *   - single token (e.g. "kay-monitor"): override identity, loads watches/<token>/behavior.md
+   *   - prose (contains whitespace): inline behavior
+   */
+  behavior?: string;
+  enabled: boolean;
+}
 
-const telegramSchema = z.object({
-  enabled: z.boolean().default(true),
-  bot_token: z.string().nullable().default(null),
-  chat_id: z.number().nullable().default(null),
-  open: z.boolean().default(false),
-});
+export interface SlackConfig {
+  enabled: boolean;
+  bot_token: string | null;
+  app_token: string | null;
+  dm_user_id: string | null;
+  bot_user_id: string | null;
+  bot_name: string | null;
+  workspace: string | null;
+  workspace_id: string | null;
+  workspace_url: string | null;
+  watch: Record<string, SlackWatchChannel> | null;
+}
 
-const slackWatchChannelSchema = z.object({
-  behavior: z.string().optional(),
-  enabled: z.boolean().default(true),
-});
+/**
+ * Shared config for all Twilio-based channels (phone/sms/whatsapp).
+ * Credentials, owner identity, public URL, and the local webhook port
+ * live here so individual channels don't reach into each other's configs.
+ */
+export interface TwilioConfig {
+  /** SID used for both URL paths and Basic auth.
+   * Usually the Account SID (AC…). Can be an API Key SID (SK…) — Twilio resolves it. */
+  sid: string | null;
+  /** Basic auth password. Account Auth Token if sid is AC…, API Key Secret if SK…. */
+  secret: string | null;
+  /** Account-level Auth Token. Used to verify X-Twilio-Signature on inbound webhooks.
+   * If sid is an API Key SID (SK…), this MUST be set separately. Falls back to `secret`
+   * when sid is an Account SID and `secret` is the Auth Token. */
+  auth_token: string | null;
+  /** Owner's phone number (E.164). Highest-trust caller / messenger. */
+  owner_number: string | null;
+  /** Extra allowlisted E.164 numbers (family, close contacts). */
+  allowlist: string[];
+  /** Public base URL Twilio hits (e.g. https://clara.example.com). No trailing slash. */
+  public_base_url: string | null;
+  /** Local HTTP port the shared Twilio webhook server binds to. */
+  port: number;
+}
 
-const slackSchema = z.object({
-  enabled: z.boolean().default(true),
-  bot_token: z.string().nullable().default(null),
-  app_token: z.string().nullable().default(null),
-  dm_user_id: z.string().nullable().default(null),
-  bot_user_id: z.string().nullable().default(null),
-  bot_name: z.string().nullable().default(null),
-  workspace: z.string().nullable().default(null),
-  workspace_id: z.string().nullable().default(null),
-  workspace_url: z.string().nullable().default(null),
-  watch: z.record(z.string(), slackWatchChannelSchema).nullable().default(null),
-});
+/** Voice (Twilio Programmable Voice + OpenAI Realtime). */
+export interface PhoneConfig {
+  enabled: boolean;
+  /** Twilio number Clara dials from / inbound voice number (E.164). */
+  from_number: string | null;
+  /** OpenAI API key for the Realtime voice loop. */
+  openai_api_key: string | null;
+  /** OpenAI Realtime model id. */
+  realtime_model: string;
+  /** Realtime voice name (marin, alloy, echo, etc.). */
+  voice: string;
+}
 
-const twilioSchema = z.object({
-  sid: z.string().nullable().default(null),
-  secret: z.string().nullable().default(null),
-  auth_token: z.string().nullable().default(null),
-  owner_number: z.string().nullable().default(null),
-  allowlist: z.array(z.string()).default([]),
-  public_base_url: z.string().nullable().default(null),
-  port: z.number().default(7079),
-});
+/** SMS via Twilio (uses the shared TwilioConfig credentials). */
+export interface SmsConfig {
+  enabled: boolean;
+  /** E.164 number SMS is sent from. Defaults to phone.from_number. */
+  from_number: string | null;
+}
 
-const phoneSchema = z.object({
-  enabled: z.boolean().default(true),
-  from_number: z.string().nullable().default(null),
-  openai_api_key: z.string().nullable().default(null),
-  realtime_model: z.string().default("gpt-realtime"),
-  voice: z.string().default("marin"),
-  stt_language: z.string().default("en-US"),
-  speech_timeout: z.string().default("auto"),
-});
+/** WhatsApp via Twilio (sandbox by default; uses shared TwilioConfig). */
+export interface WhatsappConfig {
+  enabled: boolean;
+  /** WhatsApp sender E.164. Defaults to Twilio Sandbox shared number +14155238886. */
+  from_number: string | null;
+}
 
-const smsSchema = z.object({
-  enabled: z.boolean().default(true),
-  from_number: z.string().nullable().default(null),
-});
+export interface ChannelsConfig {
+  enabled: boolean;
+  default: string;
+  telegram: TelegramConfig;
+  slack: SlackConfig;
+  twilio: TwilioConfig;
+  phone: PhoneConfig;
+  sms: SmsConfig;
+  whatsapp: WhatsappConfig;
+}
 
-const whatsappSchema = z.object({
-  enabled: z.boolean().default(true),
-  from_number: z.string().default("+14155238886"),
-});
+export interface SessionFinalizationConfig {
+  enabled: boolean;
+  memoryConsolidation: boolean;
+  summaries: boolean;
+}
 
-const activeHoursSchema = z.object({
-  start: z.string().regex(/^\d{2}:\d{2}$/, "Expected HH:MM format").default("00:00"),
-  end: z.string().regex(/^\d{2}:\d{2}$/, "Expected HH:MM format").default("23:59"),
-});
+/** A coding-agent backend Clara can run on. */
+export type BackendName = "claude" | "codex" | "gemini";
 
-const sessionFinalizationSchema = z.object({
-  enabled: z.boolean().default(true),
-  memoryConsolidation: z.boolean().default(true),
-  summaries: z.boolean().default(true),
-});
-
-const channelsSchema = z.object({
-  enabled: z.boolean().default(true),
-  default: z.string().default("telegram"),
-  telegram: telegramSchema.default({ enabled: true, bot_token: null, chat_id: null, open: false }),
-  slack: slackSchema.default({ enabled: true, bot_token: null, app_token: null, dm_user_id: null, bot_user_id: null, bot_name: null, workspace: null, workspace_id: null, workspace_url: null, watch: null }),
-  twilio: twilioSchema.default({ sid: null, secret: null, auth_token: null, owner_number: null, allowlist: [], public_base_url: null, port: 7079 }),
-  phone: phoneSchema.default({ enabled: true, from_number: null, openai_api_key: null, realtime_model: "gpt-realtime", voice: "marin", stt_language: "en-US", speech_timeout: "auto" }),
-  sms: smsSchema.default({ enabled: true, from_number: null }),
-  whatsapp: whatsappSchema.default({ enabled: true, from_number: "+14155238886" }),
-});
-
-export const configSchema = z.object({
-  model: z.string().default("default"),
-  runner: backendSchema.default("claude"),
-  fallback: z.array(backendSchema).default([]),
-  timezone: z.string().default("UTC"),
-  activeHours: activeHoursSchema.default({ start: "00:00", end: "23:59" }),
-  database_url: z.string().default("postgres://localhost:5432/clara"),
-  log_level: z.string().default("info"),
-  gemini_api_key: z.string().nullable().default(null),
-  sessionFinalization: sessionFinalizationSchema.default({ enabled: true, memoryConsolidation: true, summaries: true }),
-  channels: channelsSchema.default({ enabled: true, default: "telegram", telegram: { enabled: true, bot_token: null, chat_id: null, open: false }, slack: { enabled: true, bot_token: null, app_token: null, dm_user_id: null, bot_user_id: null, bot_name: null, workspace: null, workspace_id: null, workspace_url: null, watch: null }, twilio: { sid: null, secret: null, auth_token: null, owner_number: null, allowlist: [], public_base_url: null, port: 7079 }, phone: { enabled: true, from_number: null, openai_api_key: null, realtime_model: "gpt-realtime", voice: "marin", stt_language: "en-US", speech_timeout: "auto" }, sms: { enabled: true, from_number: null }, whatsapp: { enabled: true, from_number: "+14155238886" } }),
-});
-
-export type ClaraConfig = z.infer<typeof configSchema>;
-export interface TelegramConfig extends z.infer<typeof telegramSchema> {}
-export interface SlackConfig extends z.infer<typeof slackSchema> {}
-export interface SlackWatchChannel extends z.infer<typeof slackWatchChannelSchema> {}
-export interface TwilioConfig extends z.infer<typeof twilioSchema> {}
-export interface PhoneConfig extends z.infer<typeof phoneSchema> {}
-export interface SmsConfig extends z.infer<typeof smsSchema> {}
-export interface WhatsappConfig extends z.infer<typeof whatsappSchema> {}
-export interface ChannelsConfig extends z.infer<typeof channelsSchema> {}
-export interface SessionFinalizationConfig extends z.infer<typeof sessionFinalizationSchema> {}
+export interface Config {
+  model: string;
+  /** The primary backend for jobs and chat. */
+  runner: BackendName;
+  /** Ordered fallback backends, tried when the primary is provider-down. */
+  fallback: BackendName[];
+  timezone: string;
+  activeHours: { start: string; end: string };
+  database_url: string;
+  log_level: string;
+  gemini_api_key: string | null;
+  sessionFinalization: SessionFinalizationConfig;
+  channels: ChannelsConfig;
+}

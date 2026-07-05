@@ -1,140 +1,187 @@
-import { normalizeSdkEvent } from "../normalizers/sdk";
+import { query } from "@anthropic-ai/claude-agent-sdk";
+import { randomUUID } from "crypto";
+import { existsSync } from "fs";
+import { join } from "path";
+import { homedir } from "os";
 import type { AgentBackend, AgentSession, AgentSessionContext, AgentEvent } from "../types";
 import type { Attachment } from "../../types/attachment";
+import { SdkNormalizer } from "./claude-normalize";
+import { MessageStream } from "../message-stream";
+import { getSdkSkillsSetting } from "../../core/skills";
+import { getSdkHooks } from "../../core/sdk-hooks";
+import { getConfig } from "../../utils/config";
+import { sleep } from "../../utils/retry";
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const AgentProcess: any = (await import("@anthropic-ai/claude-agent-sdk" as any)).AgentProcess;
+/** The shape of the SDK `query()` handle the session consumes. Injected so the
+ *  session is unit-testable without spawning Claude. */
+export type QueryHandle = AsyncIterable<unknown> & { close(): void };
+export type QueryFn = (args: { prompt: unknown; options: unknown }) => QueryHandle;
 
-const CLAUDE_BIN = process.env.CLAUDE_BIN || "claude";
+const MAX_SEND_RETRIES = 2;
+const DEFAULT_RETRY_DELAYS = [3_000, 8_000];
+
+/** The SDK persists sessions at ~/.claude/projects/<encoded-cwd>/<id>.jsonl. */
+function sessionFileExists(sessionId: string, cwd: string): boolean {
+  const encoded = cwd.replace(/\//g, "-");
+  return existsSync(join(homedir(), ".claude", "projects", encoded, `${sessionId}.jsonl`));
+}
+
+/** Resolve a context/config model to the SDK's `model` option ("default" → unset). */
+export function resolveSdkModel(model?: string | null): string | undefined {
+  const m = model || getConfig().model;
+  return m && m !== "default" ? m : undefined;
+}
 
 export class ClaudeBackend implements AgentBackend {
   readonly name = "claude" as const;
+  private queryFn: QueryFn;
+
+  constructor(deps?: { queryFn?: QueryFn }) {
+    this.queryFn = deps?.queryFn ?? (query as unknown as QueryFn);
+  }
 
   async openSession(ctx: AgentSessionContext): Promise<AgentSession> {
-    const args: string[] = [];
-
-    if (ctx.model) args.push("--model", ctx.model);
-    if (ctx.resume && typeof ctx.resume === "string") args.push("--resume", ctx.resume);
-    if (!ctx.interactive) args.push("--nonInteractive", "--noUserPrompt", "--print");
-
-    if (ctx.resume === false) {
-      args.push("--resume", "false");
-    }
-
-    if (ctx.subagents) {
-      for (const [name, def] of Object.entries(ctx.subagents)) {
-        args.push("--agent", JSON.stringify({ name, description: def.description, prompt: def.prompt }));
-      }
-    }
-
-    args.push("--", ctx.systemPrompt);
-
-    const SDK = await import("@anthropic-ai/claude-agent-sdk");
-    const AgentProcess = (SDK as Record<string, unknown>).AgentProcess as new (opts: Record<string, unknown>) => {
-      enablePrompt(): void;
-      disablePrompt(): void;
-      sendPrompt(text: string): AsyncIterable<unknown>;
-      abort(): void;
-      close(): Promise<void>;
-    };
-    const proc = new AgentProcess({
-      agentProcess: CLAUDE_BIN,
-      args,
-      cwd: ctx.cwd,
-      env: {
-        ...process.env,
-        CLAUDE_CODE_ENTRYPOINT: undefined,
-        CLAUDE_AGENT_SDK_VERSION: undefined,
-      },
-    });
-
-    const normalizer = new SdkNormalizer();
-    let aborted = false;
-    let abortReason: string | null = null;
-    let sessionId: string | null = null;
-
-    return {
-      get backendSessionId() {
-        return sessionId;
-      },
-
-      async *send(text: string, attachments?: Attachment[]) {
-        if (aborted) throw new Error(abortReason || "aborted");
-        proc.enablePrompt();
-
-        const lines: string[] = [text];
-        if (attachments && attachments.length > 0) {
-          for (const att of attachments) {
-            if (att.source?.type === "base64") {
-              lines.push(`<image data:${att.source.media_type || att.mediaType};base64,${att.source.data}>`);
-            } else if (att.source?.type === "url") {
-              lines.push(`<image ${att.source.url}>`);
-            } else if (att.source?.type === "path") {
-              lines.push(`<image ${att.source.file_path}>`);
-            }
-          }
-        }
-        const fullPrompt = lines.join("\n");
-
-        const iter = proc.sendPrompt(fullPrompt);
-        let sawResult = false;
-
-        try {
-          for await (const msg of iter) {
-            if (aborted) throw new Error(abortReason || "aborted");
-
-            for (const ev of normalizer.consume(msg)) {
-              if (ev.type === "session" || ev.type === "result") {
-                sessionId = ev.backendSessionId || sessionId;
-              }
-              if (ev.type === "result") sawResult = true;
-              yield ev;
-            }
-          }
-        } finally {
-          proc.disablePrompt();
-        }
-
-        if (!sawResult) {
-          yield {
-            type: "error" as const,
-            message: "Claude agent process ended without a result",
-            retryable: false,
-            providerDown: false,
-          };
-        }
-      },
-
-      abort(reason: string) {
-        aborted = true;
-        abortReason = reason;
-        proc.abort();
-      },
-
-      async close() {
-        await proc.close();
-      },
-    };
+    return new ClaudeSession(ctx, this.queryFn);
   }
 
   async canResume(backendSessionId: string, cwd: string): Promise<boolean> {
-    const { existsSync, readFileSync } = await import("fs");
-    const { join } = await import("path");
-
-    const jsonlPath = join(cwd, ".claude", "sessions.jsonl");
-    if (!existsSync(jsonlPath)) return false;
-
-    try {
-      const content = readFileSync(jsonlPath, "utf8");
-      return content.includes(backendSessionId);
-    } catch {
-      return false;
-    }
+    return sessionFileExists(backendSessionId, cwd);
   }
 }
 
-class SdkNormalizer {
-  consume(msg: unknown): AgentEvent[] {
-    return normalizeSdkEvent(msg);
+/**
+ * A warm Claude session: one `query()` subprocess + `MessageStream` reused
+ * across turns (the latency optimization). Each `send()` pushes a turn and
+ * yields its normalized events until a terminal `result`/`error`.
+ *
+ * Invariants (from the plan review):
+ *  - exactly ONE `session` event per `send()`, even across an internal retry
+ *    (a retry resumes the same session id, so the post-retry init is swallowed);
+ *  - retry teardown+restart is internal and atomic w.r.t. `abort()`.
+ */
+class ClaudeSession implements AgentSession {
+  private _sessionId: string | null;
+  private handle: QueryHandle | null = null;
+  private iterator: AsyncIterator<unknown> | null = null;
+  private stream: MessageStream | null = null;
+  private aborted: string | null = null;
+  private retryCount = 0;
+  private readonly retryDelays: number[];
+
+  constructor(
+    private ctx: AgentSessionContext & { retryDelaysMs?: number[] },
+    private queryFn: QueryFn,
+  ) {
+    this._sessionId = typeof ctx.resume === "string" ? ctx.resume : null;
+    this.retryDelays = ctx.retryDelaysMs ?? DEFAULT_RETRY_DELAYS;
+  }
+
+  get backendSessionId(): string | null {
+    return this._sessionId;
+  }
+
+  private startQuery(): void {
+    this.stream = new MessageStream();
+    const options: Record<string, unknown> = {
+      systemPrompt: this.ctx.systemPrompt,
+      cwd: this.ctx.cwd,
+      permissionMode: "bypassPermissions",
+      skills: getSdkSkillsSetting(),
+      hooks: getSdkHooks(),
+    };
+    // Interactive (chat) sessions stream partials and load project/user settings;
+    // headless one-shot jobs keep the leaner option set they had pre-refactor.
+    if (this.ctx.interactive) {
+      options.includePartialMessages = true;
+      options.settingSources = ["project", "user"];
+    }
+    const model = resolveSdkModel(this.ctx.model);
+    if (model) options.model = model;
+    if (this._sessionId) {
+      options.resume = this._sessionId;
+    } else {
+      options.sessionId = randomUUID();
+      // Interactive sessions also forbid auto-continue of a prior session in the
+      // same cwd; jobs always run with a unique id and never auto-continued.
+      if (this.ctx.interactive) options.continue = false;
+    }
+    if (this.ctx.mcpServers) options.mcpServers = this.ctx.mcpServers;
+    if (this.ctx.subagents && Object.keys(this.ctx.subagents).length > 0) options.agents = this.ctx.subagents;
+
+    this.handle = this.queryFn({ prompt: this.stream, options });
+    this.iterator = this.handle[Symbol.asyncIterator]();
+  }
+
+  async *send(text: string, attachments?: Attachment[]): AsyncIterable<AgentEvent> {
+    let sawSession = false;
+    while (true) {
+      if (!this.iterator || !this.stream) this.startQuery();
+      this.stream!.push(text, attachments);
+      const normalizer = new SdkNormalizer();
+      let retry = false;
+
+      while (true) {
+        let res: IteratorResult<unknown>;
+        try {
+          res = await this.iterator!.next();
+        } catch (err) {
+          if (this.aborted) throw new Error(this.aborted);
+          throw err instanceof Error ? err : new Error(String(err));
+        }
+        if (this.aborted) throw new Error(this.aborted);
+        if (res.done) {
+          if (this.aborted) throw new Error(this.aborted);
+          throw new Error("stream ended without result");
+        }
+
+        for (const ev of normalizer.consume(res.value)) {
+          if (ev.type === "session") {
+            this._sessionId = ev.backendSessionId;
+            if (!sawSession) {
+              sawSession = true;
+              yield ev;
+            }
+            continue;
+          }
+          if (ev.type === "error" && ev.retryable && this.retryCount < MAX_SEND_RETRIES) {
+            this.retryCount++;
+            yield { type: "thinking", delta: "retrying after API error..." };
+            await this.teardown();
+            await sleep(this.retryDelays[this.retryCount - 1] ?? 8_000);
+            retry = true;
+            break;
+          }
+          // A retryable error that survived all our retries means the provider is
+          // effectively down for us — flag it so the consumer can fail over.
+          const out =
+            ev.type === "error" && ev.retryable && this.retryCount >= MAX_SEND_RETRIES
+              ? { ...ev, providerDown: true }
+              : ev;
+          yield out;
+          if (out.type === "result" || out.type === "error") {
+            this.retryCount = 0;
+            return;
+          }
+        }
+        if (retry) break; // restart the outer loop: startQuery() resumes the same session id
+      }
+    }
+  }
+
+  abort(reason: string): void {
+    this.aborted = reason;
+    this.handle?.close();
+  }
+
+  private async teardown(): Promise<void> {
+    this.stream?.end();
+    this.handle?.close();
+    this.stream = null;
+    this.handle = null;
+    this.iterator = null;
+  }
+
+  async close(): Promise<void> {
+    await this.teardown();
   }
 }

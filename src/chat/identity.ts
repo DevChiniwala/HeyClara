@@ -1,20 +1,25 @@
 import { existsSync, readFileSync } from "fs";
+import { join } from "path";
 import { getPaths } from "../utils/paths";
+import { getEnvironmentPrompt, getModePrompt, getChannelPrompt } from "../prompts";
 import { getSkillsSummary } from "../core/skills";
 import { getAgentsSummary } from "../core/agents";
 import { getEmployeesSummary } from "../core/employees";
 import { Session } from "../db/models";
-import type { Mode } from "../types/enums";
+import type { Mode } from "../types";
+
+export { type SkillInfo } from "../core/skills";
 
 function loadFile(dir: string, name: string): string {
-  const filePath = `${dir}/${name}`;
+  const filePath = join(dir, name);
   if (!existsSync(filePath)) return "";
   return readFileSync(filePath, "utf8").trim();
 }
 
-function loadIdentity(): string {
+export function loadIdentity(): string {
   const { selfDir } = getPaths();
-  return ["identity.md", "owner.md", "soul.md", "rules.md", "memory.md"]
+  const files = ["identity.md", "owner.md", "soul.md", "rules.md", "memory.md"];
+  return files
     .map((f) => loadFile(selfDir, f))
     .filter(Boolean)
     .join("\n\n");
@@ -26,12 +31,13 @@ export function buildSystemPrompt(mode: Mode = "chat", channel: string = "termin
   const identity = loadIdentity();
   if (identity) parts.push(identity);
 
-  parts.push("## Environment\nYou are Clara, a personal AI assistant running as a daemon. You have access to MCP tools for managing jobs, messages, memory, and channels.");
+  parts.push(getEnvironmentPrompt());
 
-  if (mode === "chat") parts.push("## Mode: Chat\nYou are in an interactive conversation. Respond conversationally. Use your tools when appropriate.");
-  if (mode === "job") parts.push("## Mode: Job\nYou are running as a scheduled job. Complete the task efficiently and report results.");
+  const modePrompt = getModePrompt(mode);
+  if (modePrompt) parts.push(modePrompt);
 
-  if (channel !== "terminal") parts.push(`## Channel: ${channel}\nYou are communicating via ${channel}. Keep responses appropriate for the medium.`);
+  const channelPrompt = getChannelPrompt(channel);
+  if (channelPrompt) parts.push(channelPrompt);
 
   const skills = getSkillsSummary();
   if (skills) parts.push(skills);
@@ -45,12 +51,17 @@ export function buildSystemPrompt(mode: Mode = "chat", channel: string = "termin
   return parts.join("\n\n");
 }
 
+/**
+ * Build the context suffix (env + mode + skills + agents + employees) that should
+ * be appended to any custom system prompt (agent body, watch behavior, etc).
+ * Does NOT include Clara's identity — that's the caller's responsibility.
+ */
 export function buildContextSuffix(mode: Mode = "chat"): string {
   const parts: string[] = [];
-  parts.push("## Environment\nYou are Clara, a personal AI assistant running as a daemon.");
+  parts.push(getEnvironmentPrompt());
 
-  if (mode === "chat") parts.push("## Mode: Chat\nRespond conversationally. Use your tools when appropriate.");
-  if (mode === "job") parts.push("## Mode: Job\nComplete the task efficiently and report results.");
+  const modePrompt = getModePrompt(mode);
+  if (modePrompt) parts.push(modePrompt);
 
   const skills = getSkillsSummary();
   if (skills) parts.push(skills);
@@ -64,17 +75,21 @@ export function buildContextSuffix(mode: Mode = "chat"): string {
   return parts.join("\n\n");
 }
 
+/**
+ * Load recent session summaries for a room and format as a context block.
+ * Returns empty string if no summaries are available.
+ */
 export async function getSessionContext(room: string): Promise<string> {
   try {
     const summaries = await Session.getRecentSummaries(room, 3);
     if (summaries.length === 0) return "";
 
     const lines = summaries
-      .reverse()
+      .reverse() // oldest first
       .map((s) => `- (${s.updatedAt}): ${s.summary}`)
       .join("\n");
 
-    return `## Recent Session Context\nBrief summaries of your last few sessions:\n${lines}`;
+    return `## Recent Session Context\nBrief summaries of your last few sessions in this room — use for continuity:\n${lines}`;
   } catch {
     return "";
   }

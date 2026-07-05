@@ -1,18 +1,46 @@
-#!/usr/bin/env bun
-"use strict";
-const { join } = require("path");
-const { existsSync } = require("fs");
+#!/bin/sh
 
-// Find the project root by walking up from this binary
-let root = __dirname;
-for (let i = 0; i < 10; i++) {
-  const candidate = join(root, "package.json");
-  if (existsSync(candidate)) {
-    require(join(root, "src", "cli", "index.ts"));
-    return;
-  }
-  root = join(root, "..");
-}
+# Check if bun is available (including ~/.bun/bin which may not be in PATH yet)
+BUN_CMD=""
+if command -v bun >/dev/null 2>&1; then
+  BUN_CMD="bun"
+elif [ -x "$HOME/.bun/bin/bun" ]; then
+  BUN_CMD="$HOME/.bun/bin/bun"
+fi
 
-console.error("clara: could not find project root (package.json)");
-process.exit(1);
+if [ -z "$BUN_CMD" ]; then
+  echo "heyclara requires Bun runtime."
+  printf "Install Bun now? (y/n) "
+  read -r answer
+  if [ "$answer" = "y" ] || [ "$answer" = "Y" ]; then
+    curl -fsSL https://bun.sh/install | bash
+    BUN_CMD="$HOME/.bun/bin/bun"
+    if [ ! -x "$BUN_CMD" ]; then
+      echo "Bun install failed. Install manually: curl -fsSL https://bun.sh/install | bash"
+      exit 1
+    fi
+    echo "Bun installed. Continuing..."
+    echo ""
+  else
+    echo ""
+    echo "Install manually: curl -fsSL https://bun.sh/install | bash"
+    echo "Then run: clara $*"
+    exit 1
+  fi
+fi
+
+# Resolve the real path of this script (follows symlinks)
+REAL="$(realpath "$0" 2>/dev/null)" || REAL="$0"
+PACKAGE_DIR="$(dirname "$REAL")/.."
+ENTRY="$PACKAGE_DIR/src/cli/index.ts"
+
+if [ ! -f "$ENTRY" ]; then
+  ENTRY="$(npm root -g 2>/dev/null)/heyclara/src/cli/index.ts"
+fi
+
+if [ ! -f "$ENTRY" ]; then
+  echo "Error: could not find heyclara. Try: npm i -g heyclara"
+  exit 1
+fi
+
+exec "$BUN_CMD" "$ENTRY" "$@"

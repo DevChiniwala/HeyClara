@@ -1,20 +1,92 @@
-import { homedir } from "os";
-import { runJobWithBackend } from "./runner";
+/**
+ * Session summarizer — generates a brief handoff note when a session ends.
+ *
+ * Separate from memory consolidation. The consolidator extracts durable facts
+ * (memories/rules). The summarizer produces a short, ephemeral context bridge
+ * so the next session knows what just happened.
+ *
+ * Summaries are stored directly in the sessions table (summary column) via SQL.
+ * The last few summaries are injected into buildSystemPrompt() so new sessions
+ * have continuity without needing full transcript access.
+ */
+
+import { Message, Session } from "../db/models";
+import { runTask } from "./runner";
 import { log } from "../utils/log";
+import type { SessionMessage } from "../types";
 
-export async function generateSessionSummary(sessionId: string, messages: string): Promise<string> {
-  const systemPrompt = [
-    "You are a session summarizer. Create a concise summary of the conversation below.",
-    "Focus on: key decisions made, action items, user preferences revealed, and important context.",
-    "Keep the summary under 200 words. Write in third person.",
-  ].join("\n");
+/** Bounded dedup: sessionId → message count at last summarization. */
+const processedCounts = new Map<string, number>();
+const inFlight = new Set<string>();
+const MAX_TRACKED = 500;
 
-  const result = await runJobWithBackend(systemPrompt, `Summarize this conversation:\n\n${messages}`, homedir());
+/** Max messages to include (most recent). */
+const MAX_MESSAGES = 30;
 
-  if (result.error) {
-    log.warn({ sessionId, error: result.error }, "session summary generation failed");
-    return "";
+/** Format transcript for the summarization prompt. */
+function formatTranscript(messages: SessionMessage[]): string {
+  const recent = messages.slice(-MAX_MESSAGES);
+  return recent.map((m) => `[${m.sender}]: ${m.content.slice(0, 1000)}`).join("\n");
+}
+
+/**
+ * Summarize a session and store the result in the sessions table.
+ * Called when a chat engine goes idle — produces a context bridge for the next session.
+ */
+export async function summarizeSession(sessionId: string, room: string): Promise<void> {
+  if (room.includes("placeholder")) return;
+  if (inFlight.has(sessionId)) return;
+
+  try {
+    const messages = await Message.getBySession(sessionId);
+    if (messages.length < 2) return;
+
+    // Skip if already processed this exact message count
+    if (processedCounts.get(sessionId) === messages.length) return;
+
+    inFlight.add(sessionId);
+
+    log.info({ sessionId, room, messageCount: messages.length }, "summarizer: generating session summary");
+
+    const transcript = formatTranscript(messages);
+
+    const prompt = `Job: session-summary (triggered by session idle in ${room})
+
+Generate a brief session summary. This will be shown to your future self at the start of the next session for continuity.
+
+## Conversation
+${transcript}
+
+## Instructions
+Write a 2-4 sentence summary covering:
+- What was discussed or worked on
+- Any decisions made or outcomes reached
+- Anything pending or unresolved
+
+Keep it concise — a handoff note, not a report. Output ONLY the summary text.`;
+
+    const output = await runTask({ name: "summarizer", prompt });
+
+    if (output.error) {
+      throw new Error(`summarizer task failed: ${output.error}`);
+    }
+
+    const summary = output.agentText.trim();
+    if (summary && summary.length > 10 && summary.length < 2000) {
+      await Session.setSummary(sessionId, summary);
+      processedCounts.set(sessionId, messages.length);
+      if (processedCounts.size > MAX_TRACKED) {
+        const firstKey = processedCounts.keys().next().value;
+        if (firstKey) processedCounts.delete(firstKey);
+      }
+      log.info({ sessionId, room, summaryChars: summary.length }, "summarizer: saved");
+    } else {
+      log.warn({ sessionId, room, length: summary.length }, "summarizer: output too short or too long, skipped");
+    }
+  } catch (err) {
+    log.error({ err, sessionId, room }, "summarizer: failed");
+    throw err;
+  } finally {
+    inFlight.delete(sessionId);
   }
-
-  return result.agentText.trim();
 }

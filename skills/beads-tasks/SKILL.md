@@ -3,20 +3,20 @@ name: beads-tasks
 description: >
   Persistent task management via Beads CLI (bd). Use when user mentions tasks, todos, issues, or tracking work.
   Check `which bd` first — if missing, offer: `npm install -g @beads/bd`.
-  All commands: run from `$BEATS_DIR` (for example `~/.niahere/beads`) and use `bd <command>`. Always label: `--label project:<project-name>`.
+  All commands: run from `$BEATS_DIR` (for example `~/.heyclara/beads`) and use `bd <command>`. Always label: `--label project:<project-name>`.
   Run `bd --help` or `bd help --all` for available commands. Not for ephemeral in-conversation tracking.
 ---
 
 ## Overview
 
 Global task manager powered by [Beads](https://github.com/steveyegge/beads). Stores all tasks in
-`~/.niahere/beads/` as a single cross-project DB. Projects are organized via `project:<name>` labels.
+`~/.heyclara/beads/` as a single cross-project DB. Projects are organized via `project:<name>` labels.
 
 ## Quick Start
 
 1. Check `which bd` — install if missing.
-2. Ensure `~/.niahere/beads/.beads` exists — `bd init` if not.
-3. Set `BEATS_DIR` to your Beads workspace (for example `~/.niahere/beads`).
+2. Ensure `~/.heyclara/beads/.beads` exists — `bd init` if not.
+3. Set `BEATS_DIR` to your Beads workspace (for example `~/.heyclara/beads`).
 4. All commands: `cd "$BEATS_DIR" && bd <command>`.
 5. Always label with `--label project:<name>`.
 6. Run `cd "$BEATS_DIR" && bd --help` or `bd help --all` for available commands.
@@ -170,7 +170,7 @@ When reorganizing, reparent with `bd update <id> --parent <new-parent>` — don'
 
 ## Conventions
 
-- **Titles:** descriptive, actionable (e.g. "Fix auth token refresh in niahere")
+- **Titles:** descriptive, actionable (e.g. "Fix auth token refresh in heyclara")
 - **Descriptions:** always include context — what's broken, why it matters, links to references (Canny, threads, logs). Future you needs enough to start working without asking questions.
 - **Types:** `epic`, `bug`, `feature`, `task`, `chore`, `decision`
 - **Priority:** P0 (critical) → P4 (nice-to-have). Default P2 unless user specifies.

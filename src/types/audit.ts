@@ -1,7 +1,9 @@
+import type { JobStatus, JobStateStatus } from "./enums";
+
 export interface AuditEntry {
   job: string;
   timestamp: string;
-  status: string;
+  status: JobStatus;
   result: string;
   duration_ms: number;
   session_id?: string;
@@ -11,11 +13,9 @@ export interface AuditEntry {
 
 export interface JobState {
   lastRun: string;
-  status: string;
+  status: JobStateStatus;
   duration_ms: number;
   error?: string;
 }
 
-export interface CronState {
-  [jobName: string]: JobState;
-}
+export type CronState = Record<string, JobState>;

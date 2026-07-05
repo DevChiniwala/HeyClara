@@ -1,27 +1,30 @@
-import type { ScheduleType, JobLifecycle } from "./enums";
+import type { JobStatus } from "./enums";
 
 export interface JobInput {
   name: string;
   schedule: string;
   prompt: string;
-  enabled?: boolean;
-  status?: JobLifecycle;
-  scheduleType?: ScheduleType;
-  always?: boolean;
+  agent?: string | null;
+  employee?: string | null;
+  model?: string | null;
   stateless?: boolean;
-  agent?: string;
-  employee?: string;
-  model?: string;
 }
 
-export interface JobPromptSource {
-  source: "db" | "file";
-  prompt: string;
-  filePath?: string;
-}
+export type JobPromptSource = "file" | "database" | "default";
 
 export interface ResolvedJobPrompt {
-  source: "db" | "file";
   prompt: string;
-  filePath?: string;
+  source: JobPromptSource;
+  filePath: string | null;
+}
+
+export interface JobResult {
+  job: string;
+  timestamp: string;
+  status: JobStatus;
+  result: string;
+  duration_ms: number;
+  session_id?: string;
+  terminal_reason?: string;
+  error?: string;
 }

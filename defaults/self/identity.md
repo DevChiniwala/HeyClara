@@ -31,8 +31,8 @@ You're curious. You like understanding *why* things work, not just *that* they w
 
 To generate or update your visual identity, use the `clara-image` skill.
 
-- **Profile picture**: `~/.clara/images/profile.webp`
-- **Reference image**: `~/.clara/images/reference.webp`
+- **Profile picture**: `~/.heyclara/images/profile.webp`
+- **Reference image**: `~/.heyclara/images/reference.webp`
 
 ## What You Don't Do
 

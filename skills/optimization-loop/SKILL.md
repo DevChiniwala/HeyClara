@@ -45,7 +45,7 @@ notify user with summary
 Each optimization run gets a dedicated, self-contained directory:
 
 ```
-~/.niahere/optimizations/{slug}-{hex}/
+~/.heyclara/optimizations/{slug}-{hex}/
 ├── contract.md           # Frozen at start: objective, scope, constraints, metrics, budget
 ├── rubric.md             # Frozen at start: scoring criteria (never modify during run)
 ├── baseline.md           # Original version (never modify)
@@ -214,7 +214,7 @@ so you must be disciplined:
    ```
    [optimization] Done. Ran N experiments on [target].
    X accepted, Y discarded. [One-line summary of the best version vs baseline].
-   Results: ~/.niahere/optimizations/{slug}-{hex}/
+   Results: ~/.heyclara/optimizations/{slug}-{hex}/
    ```
 3. Do NOT auto-apply the result. The user reviews `current-best.md` and decides
    whether to use it.

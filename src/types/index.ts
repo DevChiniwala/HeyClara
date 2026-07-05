@@ -1,20 +1,21 @@
-export type { BackendName, ScheduleType, JobLifecycle, JobRunStatus, Mode, ChannelName, AttachmentType, DeliveryStatus } from "./enums";
 export type { Attachment } from "./attachment";
+export type { JobStatus, JobStateStatus, JobLifecycle, ScheduleType, Mode, AttachmentType, ChannelName } from "./enums";
+export type { JobInput, JobPromptSource, JobResult, ResolvedJobPrompt } from "./job";
+export type { SendResult, StreamCallback, ActivityCallback, SendCallbacks, ChatEngine, EngineOptions } from "./engine";
+export type { AuditEntry, JobState, CronState } from "./audit";
+export type { Channel, ChannelFactory, Outbound, OutboundMedia, Recipient } from "./channel";
+export type { ChatState } from "./chat-state";
 export type {
-  ClaraConfig,
+  Config,
   ChannelsConfig,
   TelegramConfig,
   SlackConfig,
-  SlackWatchChannel,
   TwilioConfig,
   PhoneConfig,
   SmsConfig,
   WhatsappConfig,
-  SessionFinalizationConfig,
 } from "./config";
-export type { SendResult, StreamCallback, ActivityCallback, SendCallbacks, WatchBehavior, EngineOptions, ChatEngine, JobResult } from "./engine";
-export type { Channel, ChannelFactory, Outbound, OutboundMedia, Recipient } from "./channel";
-export type { ChatState } from "./chat-state";
+export type { Paths } from "./paths";
 export type { SaveMessageParams, RoomStats, RecentMessage, SearchResult, SessionMessage } from "./message";
-export type { JobInput, JobPromptSource, ResolvedJobPrompt } from "./job";
+export type { AgentInfo } from "./agent";
 export type { EmployeeInfo } from "./employee";

@@ -1,48 +1,103 @@
-import { ActiveEngine } from "../db/models";
-import { log } from "../utils/log";
+/**
+ * Guard against stopping/restarting while active engines are running.
+ *
+ * Default: warn and refuse.
+ * --wait <minutes>: poll until engines clear, then proceed. Times out with error.
+ * --force: skip the guard and ask the daemon to close active handles.
+ */
 
-export interface GuardFlags {
-  wait: number; // minutes to wait (0 = no wait)
+import { ActiveEngine } from "../db/models";
+import { withDb } from "../db/with-db";
+import { DIM, RESET, ICON_WARN } from "../utils/cli";
+
+export interface GuardOptions {
+  /** Wait up to this many minutes for engines to clear. 0 = don't wait (default). */
+  waitMinutes: number;
+  /** Skip the guard entirely. */
   force: boolean;
 }
 
-export function parseGuardFlags(args: string[]): GuardFlags {
-  const flags: GuardFlags = { wait: 0, force: false };
-  for (let i = 0; i < args.length; i++) {
-    if (args[i] === "--wait" && args[i + 1]) {
-      flags.wait = parseInt(args[i + 1], 10) || 0;
-      i++;
-    }
-    if (args[i] === "--force") flags.force = true;
-  }
-  return flags;
-}
+export function parseGuardFlags(args: string[]): GuardOptions {
+  const force = args.includes("--force") || args.includes("-f");
 
-export function withDefaultWait(flags: GuardFlags, minutes: number): GuardFlags {
-  return { ...flags, wait: flags.wait || minutes };
-}
-
-export async function guardActiveEngines(action: string, flags: GuardFlags): Promise<boolean> {
-  const engines = await ActiveEngine.list();
-  if (engines.length === 0) return true;
-
-  log.info({ action, count: engines.length }, "active engines running");
-
-  if (flags.force) return true;
-
-  if (flags.wait > 0) {
-    log.info({ waitMinutes: flags.wait }, "waiting for active engines to finish");
-    const deadline = Date.now() + flags.wait * 60_000;
-    while (Date.now() < deadline) {
-      const remaining = await ActiveEngine.list();
-      if (remaining.length === 0) return true;
-      await new Promise((r) => setTimeout(r, 2000));
-    }
-    log.warn({ count: (await ActiveEngine.list()).length }, "wait timed out, active engines still running");
+  let waitMinutes = 0;
+  const waitIdx = args.indexOf("--wait");
+  if (waitIdx !== -1 && args[waitIdx + 1]) {
+    const parsed = parseInt(args[waitIdx + 1], 10);
+    if (!isNaN(parsed) && parsed > 0) waitMinutes = parsed;
   }
 
-  const list = engines.map((e) => `  ${e.room} (channel: ${e.channel})`).join("\n");
-  console.error(`Active engines still running:\n${list}`);
-  console.error(`Use --wait N to wait N minutes, or --force to force stop`);
+  return { waitMinutes, force };
+}
+
+export function withDefaultWait(opts: GuardOptions, defaultWaitMinutes: number): GuardOptions {
+  if (opts.force || opts.waitMinutes > 0) return opts;
+  return { ...opts, waitMinutes: defaultWaitMinutes };
+}
+
+interface ActiveSummary {
+  count: number;
+  rooms: string[];
+}
+
+async function getActiveEngines(): Promise<ActiveSummary> {
+  let count = 0;
+  let rooms: string[] = [];
+  try {
+    await withDb(async () => {
+      const engines = await ActiveEngine.list();
+      count = engines.length;
+      rooms = engines.map((e) => `${e.room} (${e.channel})`);
+    });
+  } catch {
+    // DB unreachable — no engines to worry about
+  }
+  return { count, rooms };
+}
+
+/**
+ * Check for active engines before a destructive operation.
+ * Returns true if safe to proceed, false if blocked.
+ */
+export async function guardActiveEngines(action: string, opts: GuardOptions): Promise<boolean> {
+  if (opts.force) return true;
+
+  const { count, rooms } = await getActiveEngines();
+  if (count === 0) return true;
+
+  // Active engines found
+  console.log(`\n${ICON_WARN} ${count} active engine${count > 1 ? "s" : ""} running:`);
+  for (const room of rooms) {
+    console.log(`  ${DIM}${room}${RESET}`);
+  }
+
+  if (opts.waitMinutes === 0) {
+    // Default: refuse
+    console.log(`\nCannot ${action} while engines are active.`);
+    console.log(`${DIM}Options:${RESET}`);
+    console.log(`  --wait <minutes>  Wait for engines to finish (checks every 5s)`);
+    console.log(`  --force           ${action} immediately, killing active sessions`);
+    return false;
+  }
+
+  // --wait: poll until clear or timeout
+  const deadlineMs = opts.waitMinutes * 60 * 1000;
+  const deadline = Date.now() + deadlineMs;
+  console.log(`\nWaiting up to ${opts.waitMinutes}m for engines to finish...`);
+
+  while (Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, 5_000));
+    const { count: remaining } = await getActiveEngines();
+    if (remaining === 0) {
+      console.log("All engines finished.");
+      return true;
+    }
+    const left = Math.ceil((deadline - Date.now()) / 1000);
+    process.stdout.write(`\r${DIM}  ${remaining} active, ${left}s remaining${RESET}`);
+  }
+
+  process.stdout.write("\n");
+  console.log(`\nTimed out — ${count} engine${count > 1 ? "s" : ""} still active.`);
+  console.log(`Use --force to ${action} anyway.`);
   return false;
 }

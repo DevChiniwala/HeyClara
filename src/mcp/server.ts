@@ -1,13 +1,19 @@
 import { createSdkMcpServer, tool } from "@anthropic-ai/claude-agent-sdk";
 import { CLARA_TOOLS } from "./tools/table";
+import type { McpSourceContext } from "./index";
 
-export function createClaraMcpServer(sourceCtx?: Record<string, unknown>) {
+/**
+ * In-process MCP server for the Claude Agent SDK. Maps over the single
+ * `CLARA_TOOLS` table so the in-process and loopback-HTTP transports stay in
+ * lockstep — there is no second tool list to drift.
+ */
+export function createNiaMcpServer(sourceCtx?: McpSourceContext) {
   return createSdkMcpServer({
     name: "clara",
-    version: "0.5.0",
+    version: "0.1.0",
     tools: CLARA_TOOLS.map((t) =>
       tool(t.name, t.description, t.schema, async (args: unknown) => ({
-        content: [{ type: "text" as const, text: await t.handler(args as Record<string, unknown>, sourceCtx) }],
+        content: [{ type: "text" as const, text: await t.handler(args, sourceCtx) }],
       })),
     ),
   });

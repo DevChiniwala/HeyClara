@@ -1,32 +1,39 @@
-import { CronExpressionParser } from "cron-parser";
 import { getSql } from "../connection";
+import { CronExpressionParser } from "cron-parser";
 import { parseDuration } from "../../utils/duration";
 import { computeInitialNextRun } from "../../utils/schedule";
 import { getConfig } from "../../utils/config";
 import { validateJobName } from "../../utils/job-workspace";
-import type { ScheduleType, JobLifecycle } from "../../types/enums";
+import type { ScheduleType, JobLifecycle } from "../../types";
 
+/** Validate that a schedule string matches its declared type. Throws on mismatch. */
 function validateSchedule(schedule: string, scheduleType: ScheduleType): void {
   switch (scheduleType) {
     case "cron":
-      try { CronExpressionParser.parse(schedule); } catch (err) {
+      try {
+        CronExpressionParser.parse(schedule);
+      } catch (err) {
         throw new Error(`Invalid cron expression "${schedule}": ${err instanceof Error ? err.message : err}`);
       }
       break;
     case "interval":
-      try { parseDuration(schedule); } catch (err) {
+      try {
+        parseDuration(schedule);
+      } catch (err) {
         throw new Error(`Invalid interval "${schedule}": ${err instanceof Error ? err.message : err}`);
       }
       break;
     case "once": {
       const d = new Date(schedule);
-      if (isNaN(d.getTime())) throw new Error(`Invalid timestamp "${schedule}": expected ISO 8601 date`);
+      if (isNaN(d.getTime())) {
+        throw new Error(`Invalid timestamp "${schedule}": expected ISO 8601 date`);
+      }
       break;
     }
   }
 }
 
-export interface JobRow {
+export interface Job {
   name: string;
   schedule: string;
   prompt: string;
@@ -43,26 +50,29 @@ export interface JobRow {
   updatedAt: string;
 }
 
-const COLS = "name, schedule, prompt, status, always, schedule_type, agent, employee, model, stateless, next_run_at, last_run_at, created_at, updated_at";
+const COLS =
+  "name, schedule, prompt, status, always, schedule_type, agent, employee, model, stateless, next_run_at, last_run_at, created_at, updated_at";
 
-function toJob(r: Record<string, unknown>): JobRow {
+function toJob(r: Record<string, any>): Job {
+  // Support both old (enabled boolean) and new (status text) schema
   let status: JobLifecycle;
   if (typeof r.status === "string" && ["active", "disabled", "archived"].includes(r.status)) {
     status = r.status as JobLifecycle;
   } else {
-    status = (r as any).enabled ? "active" : "disabled";
+    status = r.enabled ? "active" : "disabled";
   }
+
   return {
-    name: r.name as string,
-    schedule: r.schedule as string,
-    prompt: r.prompt as string,
+    name: r.name,
+    schedule: r.schedule,
+    prompt: r.prompt,
     status,
-    always: (r.always as boolean) ?? false,
-    scheduleType: (r.schedule_type as ScheduleType) || "cron",
-    agent: (r.agent as string) || null,
-    employee: (r.employee as string) || null,
-    model: (r.model as string) || null,
-    stateless: (r.stateless as boolean) ?? false,
+    always: r.always ?? false,
+    scheduleType: r.schedule_type || "cron",
+    agent: r.agent || null,
+    employee: r.employee || null,
+    model: r.model || null,
+    stateless: r.stateless ?? false,
     nextRunAt: r.next_run_at ? String(r.next_run_at) : null,
     lastRunAt: r.last_run_at ? String(r.last_run_at) : null,
     createdAt: String(r.created_at),
@@ -72,18 +82,27 @@ function toJob(r: Record<string, unknown>): JobRow {
 
 async function notifyChange(): Promise<void> {
   const sql = getSql();
-  await sql`SELECT pg_notify('clara_jobs', '')`;
+  await sql`SELECT pg_notify('nia_jobs', '')`;
 }
 
 export async function create(
-  name: string, schedule: string, prompt: string, always = false,
-  scheduleType: ScheduleType = "cron", nextRunAt?: Date, agent?: string,
-  stateless = false, model?: string, employee?: string,
+  name: string,
+  schedule: string,
+  prompt: string,
+  always = false,
+  scheduleType: ScheduleType = "cron",
+  nextRunAt?: Date,
+  agent?: string,
+  stateless = false,
+  model?: string,
+  employee?: string,
 ): Promise<void> {
   validateJobName(name);
   validateSchedule(schedule, scheduleType);
   const existing = await get(name);
-  if (existing) throw new Error(`Job "${name}" already exists`);
+  if (existing) {
+    throw new Error(`Job "${name}" already exists. Use \`clara job remove ${name}\` first, or choose a different name.`);
+  }
   const sql = getSql();
   await sql`
     INSERT INTO jobs (name, schedule, prompt, always, schedule_type, next_run_at, agent, stateless, model, employee, status)
@@ -92,23 +111,32 @@ export async function create(
   await notifyChange();
 }
 
-export async function list(): Promise<JobRow[]> {
+export async function list(): Promise<Job[]> {
   const sql = getSql();
   const rows = await sql`SELECT ${sql.unsafe(COLS)} FROM jobs ORDER BY name`;
   return rows.map(toJob);
 }
 
-export async function get(name: string): Promise<JobRow | null> {
+export async function get(name: string): Promise<Job | null> {
   const sql = getSql();
   const rows = await sql`SELECT ${sql.unsafe(COLS)} FROM jobs WHERE name = ${name}`;
   return rows.length > 0 ? toJob(rows[0]) : null;
 }
 
-export async function update(name: string, fields: Partial<{
-  schedule: string; prompt: string; status: JobLifecycle; always: boolean;
-  agent: string | null; employee: string | null; model: string | null;
-  stateless: boolean; scheduleType: ScheduleType;
-}>): Promise<boolean> {
+export async function update(
+  name: string,
+  fields: Partial<{
+    schedule: string;
+    prompt: string;
+    status: JobLifecycle;
+    always: boolean;
+    agent: string | null;
+    employee: string | null;
+    model: string | null;
+    stateless: boolean;
+    scheduleType: ScheduleType;
+  }>,
+): Promise<boolean> {
   const sql = getSql();
   const existing = await get(name);
   if (!existing) return false;
@@ -124,20 +152,22 @@ export async function update(name: string, fields: Partial<{
   const stateless = fields.stateless ?? existing.stateless;
 
   const scheduleChanged = fields.schedule !== undefined || fields.scheduleType !== undefined;
-  if (scheduleChanged) validateSchedule(schedule, scheduleType);
+  if (scheduleChanged) {
+    validateSchedule(schedule, scheduleType);
+  }
 
   if (scheduleChanged) {
     const nextRun = computeInitialNextRun(scheduleType, schedule, getConfig().timezone);
     await sql`
-      UPDATE jobs SET schedule=${schedule}, schedule_type=${scheduleType}, prompt=${prompt}, status=${status},
-        always=${always}, agent=${agent}, employee=${employee}, model=${model}, stateless=${stateless},
-        next_run_at=${nextRun}, updated_at=NOW() WHERE name=${name}
+      UPDATE jobs
+      SET schedule = ${schedule}, schedule_type = ${scheduleType}, prompt = ${prompt}, status = ${status}, always = ${always}, agent = ${agent}, employee = ${employee}, model = ${model}, stateless = ${stateless}, next_run_at = ${nextRun}, updated_at = NOW()
+      WHERE name = ${name}
     `;
   } else {
     await sql`
-      UPDATE jobs SET schedule=${schedule}, schedule_type=${scheduleType}, prompt=${prompt}, status=${status},
-        always=${always}, agent=${agent}, employee=${employee}, model=${model}, stateless=${stateless},
-        updated_at=NOW() WHERE name=${name}
+      UPDATE jobs
+      SET schedule = ${schedule}, schedule_type = ${scheduleType}, prompt = ${prompt}, status = ${status}, always = ${always}, agent = ${agent}, employee = ${employee}, model = ${model}, stateless = ${stateless}, updated_at = NOW()
+      WHERE name = ${name}
     `;
   }
   await notifyChange();
@@ -151,17 +181,19 @@ export async function remove(name: string): Promise<boolean> {
   return result.count > 0;
 }
 
-export async function listEnabled(): Promise<JobRow[]> {
+export async function listEnabled(): Promise<Job[]> {
   const sql = getSql();
   const rows = await sql`SELECT ${sql.unsafe(COLS)} FROM jobs WHERE status = 'active' ORDER BY name`;
   return rows.map(toJob);
 }
 
-export async function listDue(): Promise<JobRow[]> {
+export async function listDue(): Promise<Job[]> {
   const sql = getSql();
   const rows = await sql`
-    SELECT ${sql.unsafe(COLS)} FROM jobs
-    WHERE status = 'active' AND next_run_at <= NOW() ORDER BY next_run_at
+    SELECT ${sql.unsafe(COLS)}
+    FROM jobs
+    WHERE status = 'active' AND next_run_at <= NOW()
+    ORDER BY next_run_at
   `;
   return rows.map(toJob);
 }
@@ -169,9 +201,9 @@ export async function listDue(): Promise<JobRow[]> {
 export async function markRun(name: string, nextRunAt: Date | null): Promise<void> {
   const sql = getSql();
   if (nextRunAt) {
-    await sql`UPDATE jobs SET last_run_at=NOW(), next_run_at=${nextRunAt}, updated_at=NOW() WHERE name=${name}`;
+    await sql`UPDATE jobs SET last_run_at = NOW(), next_run_at = ${nextRunAt}, updated_at = NOW() WHERE name = ${name}`;
   } else {
-    await sql`UPDATE jobs SET last_run_at=NOW(), status='disabled', updated_at=NOW() WHERE name=${name}`;
+    await sql`UPDATE jobs SET last_run_at = NOW(), status = 'disabled', updated_at = NOW() WHERE name = ${name}`;
   }
   await notifyChange();
 }

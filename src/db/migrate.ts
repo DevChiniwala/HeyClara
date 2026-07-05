@@ -10,9 +10,9 @@ interface Migration {
 const migrationsDir = join(import.meta.dir, "migrations");
 
 async function loadMigrations(): Promise<Migration[]> {
-  let files: string[];
-  try { files = readdirSync(migrationsDir); } catch { return []; }
-  files = files.filter((f) => f.endsWith(".ts") || f.endsWith(".js")).sort();
+  const files = readdirSync(migrationsDir)
+    .filter((f) => f.endsWith(".ts") || f.endsWith(".js"))
+    .sort();
 
   const migrations: Migration[] = [];
   for (const file of files) {

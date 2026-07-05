@@ -10,9 +10,9 @@ another week.
 
 Read these in full:
 
-- `~/.clara/self/staging.md` — the candidate log you will work on
-- `~/.clara/self/memory.md` — existing durable facts (avoid duplicates)
-- `~/.clara/self/rules.md` — existing behavioral rules (avoid duplicates)
+- `~/.heyclara/self/staging.md` — the candidate log you will work on
+- `~/.heyclara/self/memory.md` — existing durable facts (avoid duplicates)
+- `~/.heyclara/self/rules.md` — existing behavioral rules (avoid duplicates)
 
 The staging.md header documents the entry format:
 `- [count×] [type] content :: first_seen → last_seen`
@@ -34,7 +34,7 @@ For each entry with `count >= 2`, decide ONE of: PROMOTE / REJECT / WAIT.
 ### PROMOTE — requires ALL of these:
 
 - **Durability**: would this still matter in 30+ days?
-- **Day-1 test**: would a fresh copy of Clara starting tomorrow benefit from
+- **Day-1 test**: would a fresh copy of clara starting tomorrow benefit from
   knowing this on day 1 of its first session?
 - **Category fit**: type is exactly one of: `persona | project | reference | correction`
 - **Not already durable**: no matching entry in `memory.md` or `rules.md`
@@ -63,9 +63,9 @@ one-way door into every future session — be conservative.
 For each PROMOTE decision, rewrite the candidate as a concise, dated line
 (≤200 chars) and append to the correct file:
 
-- `type == correction` → append to `~/.clara/self/rules.md` (under a
+- `type == correction` → append to `~/.heyclara/self/rules.md` (under a
   "## Promoted YYYY-MM-DD" section you create if missing)
-- `type in (persona, project, reference)` → append to `~/.clara/self/memory.md`
+- `type in (persona, project, reference)` → append to `~/.heyclara/self/memory.md`
   (under a "## Promoted YYYY-MM-DD" section you create if missing)
 
 Then remove the promoted line from `staging.md`.

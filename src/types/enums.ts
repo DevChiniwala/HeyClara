@@ -1,15 +1,20 @@
-export type BackendName = "claude" | "codex" | "gemini";
+/** Status of a job run or audit entry. */
+export type JobStatus = "ok" | "error";
 
-export type ScheduleType = "cron" | "interval" | "once";
+/** Status of a job in the cron state (includes running). */
+export type JobStateStatus = "ok" | "error" | "running";
 
+/** Lifecycle state of a job. */
 export type JobLifecycle = "active" | "disabled" | "archived";
 
-export type JobRunStatus = "ok" | "error" | "aborted";
+/** Schedule type for jobs. */
+export type ScheduleType = "cron" | "interval" | "once";
 
+/** System mode — chat or background job. */
 export type Mode = "chat" | "job";
 
-export type ChannelName = "terminal" | "telegram" | "slack" | "sms" | "whatsapp" | "system";
+/** Attachment type for messages. */
+export type AttachmentType = "image" | "document" | "file";
 
-export type AttachmentType = "image" | "document" | "audio" | "video";
-
-export type DeliveryStatus = "pending" | "sent" | "failed";
+/** Channel names. */
+export type ChannelName = "telegram" | "slack" | "phone" | "sms" | "whatsapp";

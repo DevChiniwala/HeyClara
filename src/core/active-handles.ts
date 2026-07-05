@@ -1,32 +1,31 @@
 import { log } from "../utils/log";
 
-const handles = new Map<string, (reason: string) => void>();
+type CloseHandle = (reason: string) => void | Promise<void>;
 
-export function registerActiveHandle(id: string, abort: (reason: string) => void): void {
-  if (handles.has(id)) {
-    log.warn({ id }, "active handle already registered, overwriting");
-  }
-  handles.set(id, abort);
+const handles = new Map<string, CloseHandle>();
+
+export function registerActiveHandle(room: string, close: CloseHandle): void {
+  handles.set(room, close);
 }
 
-export function unregisterActiveHandle(id: string): void {
-  handles.delete(id);
+export function unregisterActiveHandle(room: string): void {
+  handles.delete(room);
 }
 
-export function closeAllActiveHandles(reason: string): number {
-  let count = 0;
-  for (const [id, abort] of handles) {
+export function activeHandleCount(): number {
+  return handles.size;
+}
+
+export async function closeAllActiveHandles(reason: string): Promise<number> {
+  const entries = [...handles.entries()];
+  for (const [room, close] of entries) {
     try {
-      abort(reason);
-      count++;
+      await close(reason);
     } catch (err) {
-      log.error({ err, id }, "failed to close active handle");
+      log.warn({ err, room }, "failed to close active handle");
+    } finally {
+      handles.delete(room);
     }
   }
-  handles.clear();
-  return count;
-}
-
-export function getActiveHandleCount(): number {
-  return handles.size;
+  return entries.length;
 }
