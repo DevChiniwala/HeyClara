@@ -1,0 +1,463 @@
+import * as readline from "readline";
+import { readState, readAudit } from "../utils/logger";
+import { getConfig } from "../utils/config";
+import { runJob } from "../core/runner";
+import { localTime } from "../utils/time";
+import { formatDuration } from "../utils/format";
+import { Job } from "../db/models";
+import { withDb } from "../db/with-db";
+import type { ScheduleType } from "../types";
+import { errMsg } from "../utils/errors";
+import { fail, parseArgs, pickFromList, ICON_PASS, ICON_FAIL } from "../utils/cli";
+import { computeInitialNextRun } from "../core/scheduler";
+import { resolveJobPrompt } from "../core/job-prompt";
+
+const HELP = `Usage: clara job <command>
+
+Commands:
+  list                          List all jobs
+  show [name]                   Full job details + recent runs
+  status [name]                 Quick status check
+  add <name> <schedule> <prompt>  Add a job
+      --prompt <text>             Prompt text (alternative to positional)
+      --prompt-file <path>        Read prompt from file (for long/multi-line)
+      --type cron|interval|once   Schedule type (default: cron)
+      --always                    Run 24/7 regardless of active hours
+      --agent <name>              Assign an agent to the job
+      --employee <name>           Assign an employee to the job
+      --model <model>             Model override (e.g. haiku, sonnet, opus)
+      --stateless yes|no          Disable working memory for this job
+  update <name>                 Update a job
+      --schedule <schedule>       New schedule
+      --prompt <text>             New prompt
+      --prompt-file <path>        Read prompt from file (for long/multi-line)
+      --type cron|interval|once   Change schedule type
+      --always / --no-always      Toggle 24/7 mode
+      --agent <name>              Assign agent (--no-agent to remove)
+      --employee <name>           Assign employee (--no-employee to remove)
+      --model <model>             Model override (--no-model to remove)
+      --stateless yes|no            Toggle working memory
+  remove <name>                 Delete a job
+  enable <name>                 Enable a job
+  disable <name>                Disable a job
+  archive <name>                Archive a job (out of sight)
+  unarchive <name>              Unarchive back to disabled
+  run <name>                    Run a job once
+  log [name]                    Show recent run history`;
+
+async function pickJob(prompt = "Pick a job"): Promise<string> {
+  let jobs: {
+    name: string;
+    schedule: string;
+    status: string;
+    prompt: string;
+  }[] = [];
+  try {
+    await withDb(async () => {
+      jobs = await Job.list();
+    });
+  } catch {
+    /* DB unavailable */
+  }
+
+  if (jobs.length === 0) {
+    fail("No jobs found.");
+  }
+
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout,
+  });
+  try {
+    const items = jobs.map((j) => ({
+      name: j.name,
+      label: `${j.status === "active" ? "●" : "○"} ${j.name}  ${j.schedule}`,
+    }));
+    const name = await pickFromList(rl, items, prompt);
+    if (!name) fail("Invalid selection.");
+    return name;
+  } finally {
+    rl.close();
+  }
+}
+
+export async function jobCommand(): Promise<void> {
+  const subcommand = process.argv[3];
+
+  if (!subcommand || subcommand === "help" || subcommand === "--help" || subcommand === "-h") {
+    console.log(HELP);
+    process.exit(subcommand ? 0 : 0);
+  }
+
+  switch (subcommand) {
+    case "list": {
+      try {
+        await withDb(async () => {
+          const jobs = await Job.list();
+          if (jobs.length === 0) {
+            console.log("No jobs configured. Use `clara job add` or `clara job import`.");
+          } else {
+            const visible = jobs.filter((j) => j.status !== "archived");
+            const archived = jobs.filter((j) => j.status === "archived");
+            for (const job of visible) {
+              const icon = job.status === "active" ? "●" : "○";
+              const tag = job.always ? "  always" : "";
+              const type = job.scheduleType !== "cron" ? ` (${job.scheduleType})` : "";
+              const agentTag = job.agent ? `  [${job.agent}]` : "";
+              const empTag = job.employee ? `  [emp:${job.employee}]` : "";
+              const promptTag = resolveJobPrompt(job).source === "file" ? "  [prompt.md]" : "";
+              console.log(`  ${icon} ${job.name}  ${job.schedule}${type}${tag}${agentTag}${empTag}${promptTag}`);
+            }
+            if (archived.length > 0) {
+              console.log(
+                `\n  ${archived.length} archived job${archived.length > 1 ? "s" : ""} (nia job list --all to show)`,
+              );
+            }
+          }
+        });
+      } catch (err) {
+        fail(`Failed to list jobs: ${errMsg(err)}`);
+      }
+      break;
+    }
+
+    case "add": {
+      const args = parseArgs(process.argv.slice(4), ["always"]);
+      if (args.help) {
+        console.log(HELP);
+        return;
+      }
+
+      const scheduleType = (args.getString("type") || "cron") as ScheduleType;
+      if (!["cron", "interval", "once"].includes(scheduleType)) {
+        fail(`Invalid --type: "${scheduleType}". Must be cron, interval, or once.`);
+      }
+
+      const always = args.getBool("always") ?? false;
+      const statelessRaw = args.getString("stateless");
+      const stateless = statelessRaw ? ["yes", "y", "true", "t", "1"].includes(statelessRaw.toLowerCase()) : false;
+      const agent = args.getString("agent");
+      const employee = args.getString("employee");
+      const model = args.getString("model");
+
+      const [name, schedule, ...promptParts] = args.positional;
+      const promptFlag = args.getString("prompt");
+      const promptFile = args.getString("prompt-file");
+      let prompt: string;
+      if (promptFile) {
+        const { existsSync, readFileSync } = await import("fs");
+        if (!existsSync(promptFile)) fail(`File not found: ${promptFile}`);
+        prompt = readFileSync(promptFile, "utf8").trim();
+      } else if (promptFlag) {
+        prompt = promptFlag;
+      } else {
+        prompt = promptParts.join(" ");
+      }
+
+      if (!name || !schedule || !prompt) {
+        console.error(
+          "Usage: clara job add <name> <schedule> <prompt> [--always] [--type cron|interval|once] [--agent <name>]",
+        );
+        fail('Example: clara job add heartbeat "*/10 * * * *" Check system health --always');
+      }
+
+      try {
+        const config = getConfig();
+        const nextRunAt = computeInitialNextRun(scheduleType, schedule, config.timezone);
+        await withDb(async () => {
+          await Job.create(name, schedule, prompt, always, scheduleType, nextRunAt, agent, stateless, model, employee);
+          console.log(`Job "${name}" added (${scheduleType}: ${schedule}).${always ? " (runs 24/7)" : ""}`);
+        });
+      } catch (err) {
+        fail(`Failed to add job: ${errMsg(err)}`);
+      }
+      break;
+    }
+
+    case "remove": {
+      const name = process.argv[4];
+      if (!name) fail("Usage: clara job remove <name>");
+
+      try {
+        await withDb(async () => {
+          const removed = await Job.remove(name);
+          console.log(removed ? `Job "${name}" removed.` : `Job not found: ${name}`);
+        });
+      } catch (err) {
+        fail(`Failed to remove job: ${errMsg(err)}`);
+      }
+      break;
+    }
+
+    case "enable":
+    case "disable":
+    case "archive":
+    case "unarchive": {
+      const name = process.argv[4];
+      if (!name) fail(`Usage: clara job ${subcommand} <name>`);
+      const statusMap: Record<string, string> = {
+        enable: "active",
+        disable: "disabled",
+        archive: "archived",
+        unarchive: "disabled",
+      };
+      const newStatus = statusMap[subcommand] as "active" | "disabled" | "archived";
+
+      try {
+        await withDb(async () => {
+          const updated = await Job.update(name, { status: newStatus });
+          console.log(updated ? `Job "${name}" → ${newStatus}.` : `Job not found: ${name}`);
+        });
+      } catch (err) {
+        fail(`Failed: ${errMsg(err)}`);
+      }
+      break;
+    }
+
+    case "update": {
+      const args = parseArgs(process.argv.slice(4), ["always"]);
+      if (args.help) {
+        console.log(HELP);
+        return;
+      }
+
+      const name = args.positional[0];
+      if (!name) {
+        console.error(
+          "Usage: clara job update <name> [--schedule <s>] [--prompt <p>] [--type <t>] [--always] [--no-always]",
+        );
+        fail('Example: clara job update curator --schedule "4h" --prompt "New prompt"');
+      }
+
+      const fields: Partial<{
+        schedule: string;
+        prompt: string;
+        always: boolean;
+        stateless: boolean;
+        model: string | null;
+        scheduleType: ScheduleType;
+        agent: string | null;
+        employee: string | null;
+      }> = {};
+      const schedule = args.getString("schedule");
+      const promptFile = args.getString("prompt-file");
+      let prompt = args.getString("prompt");
+      if (promptFile) {
+        const { existsSync, readFileSync } = await import("fs");
+        if (!existsSync(promptFile)) fail(`File not found: ${promptFile}`);
+        prompt = readFileSync(promptFile, "utf8").trim();
+      }
+      const scheduleType = args.getString("type") as ScheduleType | undefined;
+      const always = args.getBool("always");
+      const statelessRaw = args.getString("stateless");
+      const agent = args.getString("agent");
+      const noAgent = args.getBool("agent");
+      const employeeFlag = args.getString("employee");
+      const noEmployee = args.getBool("employee");
+
+      if (schedule) fields.schedule = schedule;
+      if (prompt) fields.prompt = prompt;
+      if (scheduleType) {
+        if (!["cron", "interval", "once"].includes(scheduleType)) {
+          fail(`Invalid --type: "${scheduleType}". Must be cron, interval, or once.`);
+        }
+        fields.scheduleType = scheduleType;
+      }
+      if (always !== undefined) fields.always = always;
+      if (statelessRaw) fields.stateless = ["yes", "y", "true", "t", "1"].includes(statelessRaw.toLowerCase());
+      if (agent) fields.agent = agent;
+      if (noAgent === false) fields.agent = null;
+      if (employeeFlag) fields.employee = employeeFlag;
+      if (noEmployee === false) fields.employee = null;
+      const modelFlag = args.getString("model");
+      const noModel = args.getBool("model");
+      if (modelFlag) fields.model = modelFlag;
+      if (noModel === false) fields.model = null;
+
+      if (Object.keys(fields).length === 0) {
+        fail(
+          "Nothing to update. Pass at least one flag (--schedule, --prompt, --type, --always, --stateless, --model, --agent, --employee).",
+        );
+      }
+
+      try {
+        await withDb(async () => {
+          const updated = await Job.update(name, fields);
+          if (!updated) fail(`Job not found: "${name}". Use \`clara job list\` to see available jobs.`);
+          console.log(`Job "${name}" updated.`);
+          if (fields.prompt !== undefined) {
+            const job = await Job.get(name);
+            if (job) {
+              const resolvedPrompt = resolveJobPrompt(job);
+              if (resolvedPrompt.source === "file") {
+                console.log(`Note: runtime prompt is still overridden by ${resolvedPrompt.filePath}.`);
+              }
+            }
+          }
+        });
+      } catch (err) {
+        fail(`Failed to update job: ${errMsg(err)}`);
+      }
+      break;
+    }
+
+    case "show": {
+      const name = process.argv[4] || (await pickJob("Show job"));
+
+      try {
+        await withDb(async () => {
+          const job = await Job.get(name);
+          if (!job) fail(`Job not found: ${name}`);
+
+          const icon = job.status === "active" ? "●" : job.status === "archived" ? "◌" : "○";
+          console.log(`  ${icon} ${job.name}`);
+          console.log(`  schedule: ${job.schedule} (${job.scheduleType})`);
+          console.log(`  status:   ${job.status}`);
+          console.log(`  always:   ${job.always}`);
+          if (job.agent) console.log(`  agent:    ${job.agent}`);
+          if (job.employee) console.log(`  employee: ${job.employee}`);
+          if (job.model) console.log(`  model:    ${job.model}`);
+          if (job.stateless) console.log(`  stateless: true`);
+          const resolvedPrompt = resolveJobPrompt(job);
+          const promptSource =
+            resolvedPrompt.source === "file" ? `file (${resolvedPrompt.filePath})` : resolvedPrompt.source;
+          console.log(`  prompt source: ${promptSource}`);
+          console.log(`  prompt:   ${resolvedPrompt.prompt}`);
+
+          const state = readState();
+          const info = state[job.name];
+          if (info) {
+            console.log(`\n  last run: ${localTime(new Date(info.lastRun))}`);
+            console.log(`  status:   ${info.status}`);
+            console.log(`  duration: ${formatDuration(info.duration_ms)}`);
+            if (info.error) console.log(`  error:    ${info.error}`);
+          } else {
+            console.log("\n  never run");
+          }
+
+          const entries = readAudit(job.name, 5);
+          if (entries.length > 0) {
+            console.log("\n  recent runs:");
+            for (const e of entries) {
+              const time = localTime(new Date(e.timestamp));
+              const dur = `${formatDuration(e.duration_ms)}`;
+              const icon = e.status === "ok" ? ICON_PASS : ICON_FAIL;
+              const summary = e.error || e.result.slice(0, 60).replace(/\n/g, " ") || "-";
+              console.log(`    ${icon} ${time}  ${dur.padStart(8)}  ${summary}`);
+            }
+          }
+        });
+      } catch (err) {
+        fail(`Failed: ${errMsg(err)}`);
+      }
+      break;
+    }
+
+    case "status": {
+      const name = process.argv[4] || (await pickJob("Job status"));
+
+      try {
+        await withDb(async () => {
+          const job = await Job.get(name);
+          if (!job) fail(`Job not found: ${name}`);
+
+          const state = readState();
+          const info = state[job.name];
+          const status = info
+            ? `${info.status} (${localTime(new Date(info.lastRun))}, ${formatDuration(info.duration_ms)})`
+            : "never run";
+          const tag = job.always ? " always" : "";
+          const icon = job.status === "active" ? "●" : job.status === "archived" ? "◌" : "○";
+          console.log(`  ${icon} ${job.name}  [${job.schedule}]${tag}  ${status}`);
+          if (info?.error) console.log(`    error: ${info.error}`);
+        });
+      } catch (err) {
+        fail(`Failed: ${errMsg(err)}`);
+      }
+      break;
+    }
+
+    case "run": {
+      const name = process.argv[4];
+      if (!name) fail("Usage: clara job run <name>");
+
+      let found: { name: string; schedule: string; prompt: string } | null = null;
+      try {
+        await withDb(async () => {
+          found = await Job.get(name);
+        });
+      } catch {
+        /* DB unavailable */
+      }
+
+      if (!found) fail(`Job not found: ${name}`);
+      const job = found as { name: string; schedule: string; prompt: string };
+
+      console.log(`Running job: ${job.name} (model: ${getConfig().model})\n`);
+
+      const MAX_LOG_LINES = 15;
+      const logLines: string[] = [];
+      let linesRendered = 0;
+
+      function renderActivity(line: string) {
+        logLines.push(line);
+        if (logLines.length > MAX_LOG_LINES) logLines.shift();
+
+        // Clear previously rendered lines
+        if (linesRendered > 0) {
+          process.stdout.write(`\x1b[${linesRendered}A\x1b[J`);
+        }
+
+        // Render current log lines
+        const output = logLines
+          .map((l, i) => {
+            const dim = i < logLines.length - 1;
+            return dim ? `  \x1b[2m${l}\x1b[0m` : `  \x1b[36m▸\x1b[0m ${l}`;
+          })
+          .join("\n");
+
+        process.stdout.write(output + "\n");
+        linesRendered = logLines.length;
+      }
+
+      const result = await runJob(job, renderActivity);
+
+      // Clear the activity log and show final result
+      if (linesRendered > 0) {
+        process.stdout.write(`\x1b[${linesRendered}A\x1b[J`);
+      }
+
+      console.log(`Status: ${result.status}`);
+      console.log(`Duration: ${formatDuration(result.duration_ms)}`);
+      if (result.terminal_reason && result.terminal_reason !== "completed") {
+        console.log(`Stopped: ${result.terminal_reason}`);
+      }
+      if (result.result) console.log(`\nResult:\n${result.result}`);
+      if (result.error) console.log(`\nError: ${result.error}`);
+      // Exit immediately — background consolidation keeps the event loop alive otherwise
+      process.exit(result.status === "ok" ? 0 : 1);
+    }
+
+    case "log": {
+      const logName = process.argv[4];
+      const entries = readAudit(logName, 20);
+      if (entries.length === 0) {
+        console.log(logName ? `No runs found for ${logName}` : "No job runs recorded yet.");
+        break;
+      }
+      for (const e of entries) {
+        const time = localTime(new Date(e.timestamp));
+        const dur = `${formatDuration(e.duration_ms)}`;
+        const status = e.status === "ok" ? ICON_PASS : ICON_FAIL;
+        const summary = e.error || e.result.slice(0, 80).replace(/\n/g, " ") || "-";
+        console.log(`  ${status} ${time}  ${dur.padStart(8)}  ${e.job}  ${summary}`);
+      }
+      break;
+    }
+
+    default:
+      console.error(`Unknown subcommand: ${subcommand}`);
+      console.log(HELP);
+      process.exit(1);
+  }
+}
