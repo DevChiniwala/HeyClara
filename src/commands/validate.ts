@@ -1,0 +1,188 @@
+import { existsSync, readFileSync } from "fs";
+import yaml from "js-yaml";
+import { getPaths } from "../utils/paths";
+import { ICON_PASS as PASS, ICON_FAIL as FAIL, ICON_WARN as WARN } from "../utils/cli";
+
+interface Result {
+  ok: boolean;
+  messages: string[];
+}
+
+function check(label: string, fn: () => string | null): { icon: string; label: string; detail?: string } {
+  const err = fn();
+  if (err) return { icon: FAIL, label, detail: err };
+  return { icon: PASS, label };
+}
+
+function warn(label: string, detail: string): { icon: string; label: string; detail?: string } {
+  return { icon: WARN, label, detail };
+}
+
+export function validateConfig(): Result {
+  const { config: configPath } = getPaths();
+  const messages: string[] = [];
+  let ok = true;
+
+  // File exists
+  if (!existsSync(configPath)) {
+    return { ok: false, messages: [`${FAIL} config.yaml not found at ${configPath}`] };
+  }
+
+  // Valid YAML
+  let raw: Record<string, unknown>;
+  try {
+    const parsed = yaml.load(readFileSync(configPath, "utf8"));
+    if (!parsed || typeof parsed !== "object") {
+      return { ok: false, messages: [`${FAIL} config.yaml is empty or not an object`] };
+    }
+    raw = parsed as Record<string, unknown>;
+    messages.push(`${PASS} valid YAML`);
+  } catch (err) {
+    return { ok: false, messages: [`${FAIL} invalid YAML: ${(err as Error).message}`] };
+  }
+
+  // Timezone
+  if (raw.timezone) {
+    try {
+      Intl.DateTimeFormat(undefined, { timeZone: raw.timezone as string });
+      messages.push(`${PASS} timezone: ${raw.timezone}`);
+    } catch {
+      messages.push(`${FAIL} invalid timezone: ${raw.timezone}`);
+      ok = false;
+    }
+  }
+
+  // Active hours
+  const ah = raw.active_hours as Record<string, string> | undefined;
+  if (ah) {
+    const timeRe = /^\d{2}:\d{2}$/;
+    if (ah.start && !timeRe.test(ah.start)) {
+      messages.push(`${FAIL} active_hours.start invalid: "${ah.start}" (expected HH:MM)`);
+      ok = false;
+    } else if (ah.start) {
+      messages.push(`${PASS} active_hours: ${ah.start}–${ah.end || "?"}`);
+    }
+    if (ah.end && !timeRe.test(ah.end)) {
+      messages.push(`${FAIL} active_hours.end invalid: "${ah.end}" (expected HH:MM)`);
+      ok = false;
+    }
+  }
+
+  // Database URL
+  const dbUrl = (process.env.DATABASE_URL || raw.database_url) as string | undefined;
+  if (dbUrl && dbUrl.startsWith("postgres")) {
+    messages.push(`${PASS} database_url set`);
+  } else if (!dbUrl) {
+    messages.push(`${WARN} database_url not set (will use default)`);
+  }
+
+  // Backends (primary runner + fallback chain)
+  const BACKENDS = ["claude", "codex", "gemini"];
+  const runner = raw.runner as string | undefined;
+  if (runner && !BACKENDS.includes(runner)) {
+    messages.push(`${FAIL} runner must be one of ${BACKENDS.join(", ")}, got "${runner}"`);
+    ok = false;
+  } else if (runner) {
+    messages.push(`${PASS} runner: ${runner}`);
+  }
+  if (raw.fallback !== undefined) {
+    const fb = raw.fallback;
+    if (!Array.isArray(fb) || fb.some((b) => !BACKENDS.includes(b as string))) {
+      messages.push(`${FAIL} fallback must be an array of ${BACKENDS.join(", ")}`);
+      ok = false;
+    } else {
+      messages.push(`${PASS} fallback: [${fb.join(", ")}]`);
+    }
+  }
+
+  // Session finalization
+  const sf = raw.session_finalization as Record<string, unknown> | undefined;
+  if (sf) {
+    let sessionFinalizationOk = true;
+    for (const key of ["enabled", "memory_consolidation", "summaries"]) {
+      const val = sf[key];
+      if (val !== undefined && typeof val !== "boolean") {
+        messages.push(`${FAIL} session_finalization.${key} must be true or false`);
+        ok = false;
+        sessionFinalizationOk = false;
+      }
+    }
+    if (sessionFinalizationOk) {
+      const enabled = sf.enabled !== false;
+      const memoryConsolidation = sf.memory_consolidation !== false;
+      const summaries = sf.summaries !== false;
+      messages.push(
+        `${PASS} session_finalization: ${enabled ? "enabled" : "disabled"} ` +
+          `(memory_consolidation=${memoryConsolidation}, summaries=${summaries})`,
+      );
+    }
+  }
+
+  // Channels
+  const ch = raw.channels as Record<string, unknown> | undefined;
+  if (ch) {
+    // Telegram
+    const tg = ch.telegram as Record<string, unknown> | undefined;
+    if (tg) {
+      if (tg.enabled === false) messages.push(`${WARN} telegram disabled`);
+      if (tg.bot_token) {
+        messages.push(`${PASS} telegram.bot_token set`);
+      } else {
+        messages.push(`${WARN} telegram.bot_token missing — telegram won't start`);
+      }
+    }
+
+    // Slack
+    const sl = ch.slack as Record<string, unknown> | undefined;
+    if (sl) {
+      if (sl.enabled === false) messages.push(`${WARN} slack disabled`);
+      if (!sl.bot_token) {
+        messages.push(`${WARN} slack.bot_token missing — slack won't start`);
+      } else {
+        messages.push(`${PASS} slack.bot_token set`);
+      }
+      if (!sl.app_token) {
+        messages.push(`${WARN} slack.app_token missing — slack won't start (Socket Mode requires app_token)`);
+      } else {
+        messages.push(`${PASS} slack.app_token set`);
+      }
+
+      // Watch channels — behavior is optional (loads from watches/<name>/behavior.md if omitted)
+      const watch = sl.watch as Record<string, unknown> | undefined;
+      if (watch) {
+        for (const [key, val] of Object.entries(watch)) {
+          if (!val || typeof val !== "object") {
+            messages.push(`${FAIL} slack.watch.${key}: must be an object`);
+            ok = false;
+            continue;
+          }
+          if (!key.includes("#")) {
+            messages.push(`${FAIL} slack.watch.${key}: must use "channel_id#name" format`);
+            ok = false;
+            continue;
+          }
+          const entry = val as Record<string, unknown>;
+          const behavior = entry.behavior;
+          if (behavior !== undefined && typeof behavior !== "string") {
+            messages.push(`${FAIL} slack.watch.${key}: "behavior" must be a string if set`);
+            ok = false;
+            continue;
+          }
+          const enabled = entry.enabled !== false;
+          const source = behavior && behavior.trim() ? "inline/file-ref" : "file (default)";
+          messages.push(`${enabled ? PASS : WARN} slack.watch: ${key} [${source}]${enabled ? "" : " (disabled)"}`);
+        }
+      }
+    }
+
+    // Unknown channel keys
+    const knownChannelKeys = new Set(["enabled", "default", "telegram", "slack"]);
+    for (const key of Object.keys(ch)) {
+      if (!knownChannelKeys.has(key)) {
+        messages.push(`${WARN} unknown channel key: "channels.${key}" — did you mean "channels.slack"?`);
+      }
+    }
+  }
+
+  return { ok, messages };
+}

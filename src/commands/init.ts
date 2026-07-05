@@ -1,0 +1,561 @@
+import * as readline from "readline";
+import { existsSync, mkdirSync, readFileSync, writeFileSync, appendFileSync } from "fs";
+import { resolve } from "path";
+import { homedir } from "os";
+import { getNiaHome, getPaths } from "../utils/paths";
+import { resetConfig } from "../utils/config";
+import { runMigrations } from "../db/migrate";
+import { closeDb } from "../db/connection";
+import { startDaemon, isRunning } from "../core/daemon";
+import { registerService, isServiceInstalled } from "./service";
+import { errMsg } from "../utils/errors";
+import { enrichSlackConfig } from "../cli/channels";
+import yaml from "js-yaml";
+
+const DEFAULTS_DIR = resolve(import.meta.dir, "../../defaults/self");
+const SKILL_ASSETS_DIR = resolve(import.meta.dir, "../../skills/clara-image/assets");
+const GENERATE_SCRIPT = resolve(import.meta.dir, "../../skills/clara-image/scripts/generate_image.py");
+
+function ask(rl: readline.Interface, question: string, defaultValue?: string): Promise<string> {
+  const suffix = defaultValue ? ` [${defaultValue}]` : "";
+  return new Promise((resolve) => {
+    rl.question(`${question}${suffix}: `, (answer) => {
+      resolve(answer.trim() || defaultValue || "");
+    });
+  });
+}
+
+function getShellRc(): string {
+  const shell = process.env.SHELL || "";
+  if (shell.endsWith("zsh")) return resolve(homedir(), ".zshrc");
+  if (shell.endsWith("bash")) {
+    const bashProfile = resolve(homedir(), ".bash_profile");
+    if (existsSync(bashProfile)) return bashProfile;
+    return resolve(homedir(), ".bashrc");
+  }
+  return resolve(homedir(), ".profile");
+}
+
+const BEADS_EXPORT_LINE = (dir: string) => `export BEADS_DIR="${dir.replace(homedir(), "$HOME")}/.beads"`;
+
+async function offerBeadsShellExport(rl: readline.Interface, beadsDir: string): Promise<void> {
+  const rcFile = getShellRc();
+  const exportLine = BEADS_EXPORT_LINE(beadsDir);
+
+  // Check if already exported
+  if (existsSync(rcFile)) {
+    const content = readFileSync(rcFile, "utf8");
+    if (content.includes("BEADS_DIR")) {
+      return; // already configured
+    }
+  }
+
+  const answer = await ask(
+    rl,
+    `\nAdd BEADS_DIR to ${rcFile.replace(homedir(), "~")} so 'bd' works globally? (y/n)`,
+    "y",
+  );
+  if (answer.toLowerCase() !== "y") return;
+
+  appendFileSync(rcFile, `\n# Beads global task DB\n${exportLine}\n`);
+  // Apply to current process so it takes effect immediately
+  const parts = exportLine.replace("$HOME", homedir()).split("=");
+  if (parts.length === 2) {
+    process.env[parts[0].replace("export ", "")] = parts[1].replace(/"/g, "");
+  }
+  console.log(`  \u2713 added BEADS_DIR to ${rcFile.replace(homedir(), "~")}`);
+}
+
+function loadTemplate(name: string, vars: Record<string, string> = {}): string {
+  const content = readFileSync(resolve(DEFAULTS_DIR, name), "utf8");
+  return content.replace(/\{\{(\w+)\}\}/g, (_, key) => vars[key] ?? "");
+}
+
+function writeIfMissing(filePath: string, content: string, label: string): void {
+  if (existsSync(filePath)) {
+    console.log(`  - ${label} already exists, skipping`);
+  } else {
+    writeFileSync(filePath, content);
+    console.log(`  \u2713 created ${label}`);
+  }
+}
+
+export async function runInit(): Promise<void> {
+  const home = getNiaHome();
+  const paths = getPaths();
+
+  console.log("Setting up clara...\n");
+
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout,
+  });
+
+  try {
+    // Load existing config if present
+    let existing: Record<string, unknown> = {};
+    if (existsSync(paths.config)) {
+      try {
+        const parsed = yaml.load(readFileSync(paths.config, "utf8"));
+        if (parsed && typeof parsed === "object") {
+          existing = parsed as Record<string, unknown>;
+        }
+      } catch {
+        // corrupt — start fresh
+      }
+    }
+
+    // Database URL
+    const { DEFAULT_DATABASE_URL } = await import("../constants");
+    const defaultDb = (existing.database_url as string) || DEFAULT_DATABASE_URL;
+    const dbUrl = await ask(rl, "Database URL", defaultDb);
+
+    // Test connection + migrate
+    process.env.DATABASE_URL = dbUrl;
+    resetConfig();
+    try {
+      await runMigrations();
+      console.log("  \u2713 connected, ran migrations");
+      await closeDb();
+    } catch (err) {
+      const msg = errMsg(err);
+      console.log(`  \u2717 could not connect: ${msg}`);
+      const setupDb = await ask(rl, "  Set up PostgreSQL now? (y/n)", "y");
+      if (setupDb.toLowerCase() === "y") {
+        const { dbSetup } = await import("./db");
+        await dbSetup();
+      } else {
+        console.log(`  (run 'nia db setup' later)\n`);
+      }
+    }
+    delete process.env.DATABASE_URL;
+
+    // Telegram
+    const exCh = (existing.channels || {}) as Record<string, unknown>;
+    const exTg = (exCh.telegram || {}) as Record<string, unknown>;
+    const exSl = (exCh.slack || {}) as Record<string, unknown>;
+
+    let telegramToken = "";
+    let telegramChatId: number | null = (exTg.chat_id as number) || null;
+    let telegramOpen = exTg.open === true;
+
+    const existingToken = (exTg.bot_token as string) || "";
+
+    if (existingToken) {
+      const masked = `...${existingToken.slice(-6)}`;
+      const reconfigure = await ask(rl, `\nTelegram: configured (${masked}). Reconfigure? (y/n)`, "n");
+      if (reconfigure.toLowerCase() === "y") {
+        const tokenInput = await ask(rl, "Bot token", "");
+        telegramToken = tokenInput || existingToken;
+        const openDefault = telegramOpen ? "y" : "n";
+        const openInput = await ask(rl, "Allow anyone to message? (y/n)", openDefault);
+        telegramOpen = openInput.toLowerCase() === "y";
+      } else {
+        telegramToken = existingToken;
+      }
+    } else {
+      const setupTelegram = await ask(rl, "\nSet up Telegram? (y/n)", "n");
+      if (setupTelegram.toLowerCase() === "y") {
+        telegramToken = await ask(rl, "Bot token", "");
+        if (telegramToken) {
+          const openInput = await ask(rl, "Allow anyone to message? (y/n)", "n");
+          telegramOpen = openInput.toLowerCase() === "y";
+          console.log("  Tip: Send a message to your bot to activate outbound messaging.");
+        }
+      }
+    }
+
+    // Slack
+    let slackBotToken = "";
+    let slackAppToken = "";
+    let slackDmUserId = (exSl.dm_user_id as string) || "";
+
+    const existingSlackBot = (exSl.bot_token as string) || "";
+
+    if (existingSlackBot) {
+      const masked = `...${existingSlackBot.slice(-6)}`;
+      const reconfigure = await ask(rl, `\nSlack: configured (${masked}). Reconfigure? (y/n)`, "n");
+      if (reconfigure.toLowerCase() === "y") {
+        const botInput = await ask(rl, "Bot token (xoxb-...)", "");
+        slackBotToken = botInput || existingSlackBot;
+        const existingSlackApp = (exSl.app_token as string) || "";
+        const appInput = await ask(rl, "App token (xapp-...)", "");
+        slackAppToken = appInput || existingSlackApp;
+        if (slackBotToken && slackAppToken) {
+          slackDmUserId = await ask(rl, "DM user ID for outbound messages (U...)", slackDmUserId);
+        }
+      } else {
+        slackBotToken = existingSlackBot;
+        slackAppToken = (exSl.app_token as string) || "";
+        slackDmUserId = (exSl.dm_user_id as string) || "";
+      }
+    } else {
+      const setupSlack = await ask(rl, "\nSet up Slack? (y/n)", "n");
+      if (setupSlack.toLowerCase() === "y") {
+        // Read manifest and build the create-app URL
+        const manifestPath = resolve(import.meta.dir, "../../defaults/channels/slack-manifest.json");
+        const manifest = readFileSync(manifestPath, "utf8");
+        const createUrl = `https://api.slack.com/apps?new_app=1&manifest_json=${encodeURIComponent(manifest)}`;
+
+        console.log("\n  Opening Slack app creation page...");
+        const openCmd = process.platform === "darwin" ? "open" : process.platform === "win32" ? "start" : "xdg-open";
+        Bun.spawn([openCmd, createUrl], { stdio: ["ignore", "ignore", "ignore"] });
+        console.log("  1. Click 'Create' to create the app");
+        console.log("  2. Go to 'OAuth & Permissions' → Install to workspace → copy Bot Token (xoxb-...)");
+        console.log(
+          "  3. Go to 'Basic Information' → 'App-Level Tokens' → create one with connections:write → copy (xapp-...)\n",
+        );
+
+        slackBotToken = await ask(rl, "Bot token (xoxb-...)", "");
+        slackAppToken = await ask(rl, "App token (xapp-...)", "");
+
+        if (slackBotToken && slackAppToken) {
+          slackDmUserId = await ask(rl, "DM user ID for outbound messages (U...)", "");
+        }
+      }
+    }
+
+    // Phone (Twilio Voice + OpenAI Realtime). Shared Twilio creds (sid,
+    // secret, auth_token, owner_number, public_base_url) live under
+    // channels.twilio so SMS and WhatsApp can reuse them; voice-specific
+    // fields stay under channels.phone.
+    const exTw = (exCh.twilio || {}) as Record<string, unknown>;
+    const exPh = (exCh.phone || {}) as Record<string, unknown>;
+    let phoneTwilioSid = (exTw.sid as string) || "";
+    let phoneTwilioSecret = (exTw.secret as string) || "";
+    let phoneTwilioAuthToken = (exTw.auth_token as string) || "";
+    let phoneFromNumber = (exPh.from_number as string) || "";
+    let phoneOwnerNumber = (exTw.owner_number as string) || "";
+    let phonePublicBaseUrl = (exTw.public_base_url as string) || "";
+    let phoneOpenAiKey = (exPh.openai_api_key as string) || "";
+    let phoneVoice = (exPh.voice as string) || "";
+
+    const existingPhoneSid = phoneTwilioSid;
+    if (existingPhoneSid) {
+      const masked = `...${existingPhoneSid.slice(-6)}`;
+      const reconfigure = await ask(rl, `\nPhone (Twilio + Realtime): configured (${masked}). Reconfigure? (y/n)`, "n");
+      if (reconfigure.toLowerCase() === "y") {
+        phoneTwilioSid = (await ask(rl, "Twilio SID (AC… or SK…)", phoneTwilioSid)) || phoneTwilioSid;
+        phoneTwilioSecret =
+          (await ask(rl, "Twilio Secret (Auth Token if AC, API Key Secret if SK)", phoneTwilioSecret)) ||
+          phoneTwilioSecret;
+        if (phoneTwilioSid.startsWith("SK")) {
+          phoneTwilioAuthToken =
+            (await ask(rl, "Twilio Auth Token (account-level — needed for webhook signing)", phoneTwilioAuthToken)) ||
+            phoneTwilioAuthToken;
+        }
+        phoneFromNumber =
+          (await ask(rl, "Twilio number to dial from (E.164, e.g. +13025551234)", phoneFromNumber)) || phoneFromNumber;
+        phoneOwnerNumber = (await ask(rl, "Your phone (E.164)", phoneOwnerNumber)) || phoneOwnerNumber;
+        phonePublicBaseUrl =
+          (await ask(rl, "Public base URL (cloudflared/ngrok https://…)", phonePublicBaseUrl)) || phonePublicBaseUrl;
+        phoneOpenAiKey = (await ask(rl, "OpenAI API key (for Realtime voice loop)", phoneOpenAiKey)) || phoneOpenAiKey;
+        phoneVoice =
+          (await ask(rl, "Realtime voice (marin, cedar, shimmer, coral, alloy…)", phoneVoice || "marin")) || phoneVoice;
+      }
+    } else {
+      const setupPhone = await ask(rl, "\nSet up phone (Twilio + OpenAI Realtime voice calls)? (y/n)", "n");
+      if (setupPhone.toLowerCase() === "y") {
+        console.log("  You'll need: a Twilio voice number, your phone number, an OpenAI API key, and a public tunnel.");
+        console.log("  See /clara-phone skill for the full deploy walkthrough.\n");
+        phoneTwilioSid = await ask(rl, "Twilio SID (AC… or SK…)", "");
+        if (phoneTwilioSid) {
+          phoneTwilioSecret = await ask(rl, "Twilio Secret (Auth Token if AC, API Key Secret if SK)", "");
+          if (phoneTwilioSid.startsWith("SK")) {
+            phoneTwilioAuthToken = await ask(rl, "Twilio Auth Token (account-level — for webhook signing)", "");
+          }
+          phoneFromNumber = await ask(rl, "Twilio number to dial from (E.164, e.g. +13025551234)", "");
+          phoneOwnerNumber = await ask(rl, "Your phone (E.164)", "");
+          phonePublicBaseUrl = await ask(rl, "Public base URL (cloudflared/ngrok https://…)", "");
+          phoneOpenAiKey = await ask(rl, "OpenAI API key", "");
+          phoneVoice = await ask(rl, "Realtime voice", "marin");
+        }
+      }
+    }
+
+    // Gemini API key (for image generation)
+    let geminiApiKey = "";
+    const existingGemini = (existing.gemini_api_key as string) || "";
+
+    if (existingGemini) {
+      const masked = `...${existingGemini.slice(-6)}`;
+      const reconfigure = await ask(rl, `\nGemini API: configured (${masked}). Reconfigure? (y/n)`, "n");
+      if (reconfigure.toLowerCase() === "y") {
+        geminiApiKey = (await ask(rl, "Gemini API key", "")) || existingGemini;
+      } else {
+        geminiApiKey = existingGemini;
+      }
+    } else {
+      const setupGemini = await ask(rl, "\nSet up Gemini API key? (for image generation) (y/n)", "n");
+      if (setupGemini.toLowerCase() === "y") {
+        geminiApiKey = await ask(rl, "API key (from https://aistudio.google.com/apikey)", "");
+      }
+    }
+
+    // Beads task manager
+    const bdInstalled = (await Bun.spawn(["which", "bd"], { stdout: "pipe", stderr: "pipe" }).exited) === 0;
+    const beadsInitialized = existsSync(`${paths.beadsDir}/.beads`);
+
+    if (bdInstalled && beadsInitialized) {
+      console.log("\nBeads: installed and initialized.");
+      await offerBeadsShellExport(rl, paths.beadsDir);
+    } else if (bdInstalled && !beadsInitialized) {
+      const initBeads = await ask(rl, "\nBeads (bd) found but not initialized. Set up global task DB? (y/n)", "y");
+      if (initBeads.toLowerCase() === "y") {
+        mkdirSync(paths.beadsDir, { recursive: true });
+        const initProc = Bun.spawn(["bd", "init"], { cwd: paths.beadsDir, stdout: "pipe", stderr: "pipe" });
+        const exitCode = await initProc.exited;
+        if (exitCode === 0) {
+          console.log(`  \u2713 initialized beads at ${paths.beadsDir}`);
+          await offerBeadsShellExport(rl, paths.beadsDir);
+        } else {
+          const stderr = await new Response(initProc.stderr).text();
+          console.log(`  \u2717 bd init failed: ${stderr.trim()}`);
+        }
+      }
+    } else {
+      const installBeads = await ask(rl, "\nInstall Beads task manager? (y/n)", "n");
+      if (installBeads.toLowerCase() === "y") {
+        console.log("  Installing...");
+        const npmProc = Bun.spawn(["npm", "install", "-g", "@beads/bd"], { stdout: "pipe", stderr: "pipe" });
+        let installExit = await npmProc.exited;
+
+        if (installExit !== 0 && process.platform === "darwin") {
+          console.log("  npm failed, trying brew...");
+          const brewProc = Bun.spawn(["brew", "install", "beads"], { stdout: "pipe", stderr: "pipe" });
+          installExit = await brewProc.exited;
+        }
+
+        if (installExit === 0) {
+          console.log("  \u2713 beads installed");
+          mkdirSync(paths.beadsDir, { recursive: true });
+          const initProc = Bun.spawn(["bd", "init"], { cwd: paths.beadsDir, stdout: "pipe", stderr: "pipe" });
+          if ((await initProc.exited) === 0) {
+            console.log(`  \u2713 initialized beads at ${paths.beadsDir}`);
+            await offerBeadsShellExport(rl, paths.beadsDir);
+          }
+        } else {
+          console.log("  \u2717 install failed. You can install manually: npm install -g @beads/bd");
+        }
+      }
+    }
+
+    // Read existing self files for defaults
+    function readExisting(file: string, field: string): string {
+      const filePath = `${paths.selfDir}/${file}`;
+      if (!existsSync(filePath)) return "";
+      const content = readFileSync(filePath, "utf8");
+      const match = content.match(new RegExp(`\\*\\*${field}\\*\\*:\\s*(.+)$`, "m"));
+      return match?.[1]?.trim() || "";
+    }
+
+    function readExistingName(file: string): string {
+      const filePath = `${paths.selfDir}/${file}`;
+      if (!existsSync(filePath)) return "";
+      const match = readFileSync(filePath, "utf8").match(/^#\s+(.+)$/m);
+      return match?.[1]?.trim() || "";
+    }
+
+    // Owner info
+    console.log("\nAbout you:");
+    const ownerName = await ask(rl, "Your name", readExisting("owner.md", "Name"));
+    const ownerRole = await ask(rl, "What do you do?", readExisting("owner.md", "Role"));
+    const ownerLocation = await ask(rl, "Location", readExisting("owner.md", "Location"));
+    const ownerInterests = await ask(rl, "Interests", readExisting("owner.md", "Interests"));
+
+    // Active hours
+    const existingHours = existing.active_hours as Record<string, string> | undefined;
+    const defaultStart = existingHours?.start || "00:00";
+    const defaultEnd = existingHours?.end || "23:59";
+    console.log("\nActive hours (jobs run only during this window, crons run 24/7):");
+    const activeStart = await ask(rl, "Start (HH:MM)", defaultStart);
+    const activeEnd = await ask(rl, "End (HH:MM)", defaultEnd);
+
+    // Agent name
+    const agentName = await ask(rl, "\nAgent name", readExistingName("identity.md") || "clara");
+
+    // Visual identity
+    const imagesDir = `${home}/images`;
+    mkdirSync(imagesDir, { recursive: true });
+    const hasUserReference = existsSync(`${imagesDir}/reference.webp`);
+    const hasDefaultReference = existsSync(`${SKILL_ASSETS_DIR}/nia-reference.webp`);
+
+    if (geminiApiKey && !hasUserReference) {
+      const setupVisual = await ask(rl, "\nGenerate a visual identity for your agent? (y/n)", "y");
+      if (setupVisual.toLowerCase() === "y") {
+        const visualChoice = await ask(rl, "Describe what your agent looks like (or press enter for default)", "");
+
+        if (visualChoice) {
+          // User provided a description — generate from scratch
+          console.log("  Generating reference image from description...");
+          const prompt = `Ultra photorealistic portrait: ${visualChoice}. Natural skin texture, DSLR quality, 8k, hyper-detailed.`;
+          const proc = Bun.spawn(
+            [
+              "python3",
+              GENERATE_SCRIPT,
+              "--no-reference",
+              "--api-key",
+              geminiApiKey,
+              "--aspect-ratio",
+              "9:16",
+              "--prompt",
+              prompt,
+              "--output",
+              `${imagesDir}/reference.webp`,
+            ],
+            { stdout: "pipe", stderr: "pipe" },
+          );
+          const exitCode = await proc.exited;
+          if (exitCode === 0) {
+            console.log(`  \u2713 generated reference image at ${imagesDir}/reference.webp`);
+            // Also generate a profile picture
+            console.log("  Generating profile picture...");
+            const profileProc = Bun.spawn(
+              [
+                "python3",
+                GENERATE_SCRIPT,
+                "--reference",
+                `${imagesDir}/reference.webp`,
+                "--api-key",
+                geminiApiKey,
+                "--aspect-ratio",
+                "1:1",
+                "--prompt",
+                `Photorealistic close-up portrait of the same person from the reference. Warm slight smile, direct eye contact, soft ambient side lighting, creamy bokeh background, 85mm f/1.8, shallow depth of field. Same face, same style, natural skin texture, DSLR quality, hyper-detailed.`,
+                "--output",
+                `${imagesDir}/profile.webp`,
+              ],
+              { stdout: "pipe", stderr: "pipe" },
+            );
+            if ((await profileProc.exited) === 0) {
+              console.log(`  \u2713 generated profile picture at ${imagesDir}/profile.webp`);
+            }
+          } else {
+            const stderr = await new Response(proc.stderr).text();
+            console.log(`  \u2717 image generation failed: ${stderr.trim().slice(0, 200)}`);
+          }
+        } else if (hasDefaultReference) {
+          // No description — copy defaults
+          const { copyFileSync } = await import("fs");
+          copyFileSync(`${SKILL_ASSETS_DIR}/nia-reference.webp`, `${imagesDir}/reference.webp`);
+          console.log(`  \u2713 copied default reference image`);
+          if (existsSync(`${SKILL_ASSETS_DIR}/nia-profile.webp`)) {
+            copyFileSync(`${SKILL_ASSETS_DIR}/nia-profile.webp`, `${imagesDir}/profile.webp`);
+            console.log(`  \u2713 copied default profile picture`);
+          }
+        }
+      }
+    } else if (hasUserReference) {
+      console.log("\nVisual identity: already set up.");
+    }
+
+    rl.close();
+
+    // Create directories
+    mkdirSync(home, { recursive: true });
+    mkdirSync(paths.selfDir, { recursive: true });
+    mkdirSync(paths.watchesDir, { recursive: true });
+    mkdirSync(`${home}/tmp`, { recursive: true });
+
+    // Write config.yaml
+    const config: Record<string, unknown> = {
+      database_url: dbUrl,
+      model: (existing.model as string) || "default",
+      timezone: (existing.timezone as string) || Intl.DateTimeFormat().resolvedOptions().timeZone,
+      log_level: (existing.log_level as string) || "info",
+      active_hours: { start: activeStart, end: activeEnd },
+    };
+
+    if (geminiApiKey) {
+      config.gemini_api_key = geminiApiKey;
+    }
+
+    // Channels config (nested)
+    const channels: Record<string, unknown> = {};
+    if (telegramToken) {
+      const tg: Record<string, unknown> = { bot_token: telegramToken, open: telegramOpen };
+      if (telegramChatId) tg.chat_id = telegramChatId;
+      channels.telegram = tg;
+    }
+    if (slackBotToken && slackAppToken) {
+      const sl: Record<string, unknown> = { bot_token: slackBotToken, app_token: slackAppToken };
+      if (slackDmUserId) sl.dm_user_id = slackDmUserId;
+      // Enrich with workspace/bot info from auth.test
+      const enriched = await enrichSlackConfig(slackBotToken);
+      Object.assign(sl, enriched);
+      channels.slack = sl;
+    }
+    if (slackBotToken && !telegramToken) {
+      channels.default = "slack";
+    }
+    if (phoneTwilioSid && phoneTwilioSecret && phoneFromNumber) {
+      const tw: Record<string, unknown> = { sid: phoneTwilioSid, secret: phoneTwilioSecret };
+      if (phoneTwilioAuthToken) tw.auth_token = phoneTwilioAuthToken;
+      if (phoneOwnerNumber) tw.owner_number = phoneOwnerNumber;
+      if (phonePublicBaseUrl) tw.public_base_url = phonePublicBaseUrl.replace(/\/$/, "");
+      channels.twilio = tw;
+
+      const ph: Record<string, unknown> = { from_number: phoneFromNumber };
+      if (phoneOpenAiKey) ph.openai_api_key = phoneOpenAiKey;
+      if (phoneVoice && phoneVoice !== "marin") ph.voice = phoneVoice;
+      channels.phone = ph;
+    }
+    if (Object.keys(channels).length > 0) {
+      config.channels = channels;
+    }
+
+    writeFileSync(paths.config, yaml.dump(config, { lineWidth: -1 }));
+    console.log(`\n  \u2713 wrote ${paths.config}`);
+
+    // --- Self files (from defaults/self/ templates) ---
+    const vars = { agentName, ownerName, ownerRole, ownerLocation, ownerInterests };
+    const selfFile = (name: string) => `${paths.selfDir}/${name}`;
+
+    // Identity and owner — always write (template-driven, not user-customized)
+    writeFileSync(selfFile("identity.md"), loadTemplate("identity.md", vars));
+    console.log(`  \u2713 wrote ${selfFile("identity.md")}`);
+
+    if (ownerName) {
+      let ownerContent = loadTemplate("owner.md", vars);
+      ownerContent = ownerContent
+        .split("\n")
+        .filter((l) => !l.match(/\*\*\w+\*\*:\s*$/))
+        .join("\n");
+      writeFileSync(selfFile("owner.md"), ownerContent);
+      console.log(`  \u2713 wrote ${selfFile("owner.md")}`);
+    }
+
+    // Soul, rules, and memory — only create if missing (user may have customized)
+    writeIfMissing(selfFile("soul.md"), loadTemplate("soul.md", vars), selfFile("soul.md"));
+    writeIfMissing(selfFile("rules.md"), loadTemplate("rules.md", vars), selfFile("rules.md"));
+    writeIfMissing(selfFile("memory.md"), loadTemplate("memory.md", vars), selfFile("memory.md"));
+    writeIfMissing(selfFile("staging.md"), loadTemplate("staging.md", vars), selfFile("staging.md"));
+
+    resetConfig();
+
+    // Install system service (launchd/systemd) for auto-restart on crash
+    if (!isServiceInstalled()) {
+      try {
+        await registerService();
+        console.log(`\n  \u2713 installed system service (auto-restart on crash)`);
+      } catch (err) {
+        console.log(`\n  \u26a0 could not install system service: ${errMsg(err)}`);
+        console.log(`    run 'nia service install' manually for auto-restart`);
+      }
+    } else {
+      console.log(`\n  - system service already installed`);
+    }
+
+    // Auto-start daemon
+    if (!isRunning()) {
+      const pid = startDaemon();
+      console.log(`  \u2713 clara started (pid: ${pid})`);
+    } else {
+      console.log(`  - clara already running`);
+    }
+
+    console.log("\nDone.");
+  } finally {
+    rl.close();
+  }
+}
