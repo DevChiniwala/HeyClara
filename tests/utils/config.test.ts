@@ -117,10 +117,15 @@ describe("loadConfig", () => {
 
   test("env var overrides database_url", () => {
     writeFileSync(`${TEST_DIR}/config.yaml`, `database_url: postgres://config\n`);
+    const orig = process.env.DATABASE_URL;
     process.env.DATABASE_URL = "postgres://env";
     const config = loadConfig();
     expect(config.database_url).toBe("postgres://env");
-    delete process.env.DATABASE_URL;
+    if (orig !== undefined) {
+      process.env.DATABASE_URL = orig;
+    } else {
+      delete process.env.DATABASE_URL;
+    }
   });
 
   test("parses runner field with default claude", () => {
