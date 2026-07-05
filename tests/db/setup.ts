@@ -91,6 +91,8 @@ export async function setupTestDb(): Promise<void> {
   process.env.DATABASE_URL = testDbUrl;
   resetConfig();
 
+  // Close any existing DB connection so getSql() re-creates it with the new URL
+  await closeDb();
   await runMigrations();
 }
 
