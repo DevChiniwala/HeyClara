@@ -1,12 +1,12 @@
 # clara
 
-[![npm version](https://img.shields.io/npm/v/heyclara.svg)](https://www.npmjs.com/package/heyclara)
-[![npm downloads](https://img.shields.io/npm/dm/heyclara.svg)](https://www.npmjs.com/package/heyclara)
-[![license](https://img.shields.io/npm/l/heyclara.svg)](https://github.com/onlyoneaman/heyclara/blob/main/LICENSE)
+[![npm version](https://img.shields.io/npm/v/@devchiniwala/heyclara.svg)](https://www.npmjs.com/package/@devchiniwala/heyclara)
+[![npm downloads](https://img.shields.io/npm/dm/@devchiniwala/heyclara.svg)](https://www.npmjs.com/package/@devchiniwala/heyclara)
+[![license](https://img.shields.io/npm/l/@devchiniwala/heyclara.svg)](https://github.com/DevChiniwala/HeyClara/blob/main/LICENSE)
 
 A personal AI agent you fork and make your own. Small enough to understand, built for one user. Powered by Claude Agent SDK.
 
-- npm package: [`heyclara`](https://www.npmjs.com/package/heyclara)
+- npm package: [`heyclara`](https://www.npmjs.com/package/@devchiniwala/heyclara)
 - CLI command: `clara`
 - Website: [heyclara.com](https://heyclara.com)
 
@@ -27,7 +27,7 @@ A personal AI agent you fork and make your own. Small enough to understand, buil
 ## Quick Start
 
 ```bash
-npm i -g heyclara        # installs globally (prompts to install Bun if missing)
+npm i -g @devchiniwala/heyclara        # installs globally (prompts to install Bun if missing)
 clara init                # guided setup (database, channels, persona, visual identity)
 clara start               # starts daemon + registers OS service
 ```
