@@ -12,7 +12,7 @@ import { registerAllChannels, startChannels, stopChannels, getStarted, getConfig
 import type { Channel } from "../types";
 import { startScheduler, stopScheduler, recomputeAllNextRuns } from "./scheduler";
 import { startAlive, stopAlive } from "./alive";
-import { createNiaMcpServer } from "../mcp/server";
+import { createClaraMcpServer } from "../mcp/server";
 import { setMcpFactory } from "../mcp";
 import { startMcpEndpoint, stopMcpEndpoint } from "../agent/mcp-endpoint";
 import { CLARA_TOOLS } from "../mcp/tools/table";
@@ -274,7 +274,7 @@ export async function runDaemon(): Promise<void> {
   }
 
   // Initialize MCP server factory (each query gets its own Protocol instance)
-  setMcpFactory((ctx) => ({ nia: createNiaMcpServer(ctx) }));
+  setMcpFactory((ctx) => ({ clara: createClaraMcpServer(ctx) }));
   log.info("MCP server factory initialized");
 
   // Start the loopback MCP endpoint that out-of-process CLI backends (Codex/

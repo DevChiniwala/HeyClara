@@ -6,7 +6,7 @@ export type { NiaTool };
 
 /**
  * One declarative tool table, consumed by both transports:
- *  - the in-process Claude SDK server (`createNiaMcpServer`)
+ *  - the in-process Claude SDK server (`createClaraMcpServer`)
  *  - the loopback HTTP MCP endpoint that the CLI backends (Codex/Gemini) connect to
  *
  * Keeping a single source of truth is what makes "one tool table, two transports"

@@ -7,7 +7,7 @@ import type { McpSourceContext } from "./index";
  * `CLARA_TOOLS` table so the in-process and loopback-HTTP transports stay in
  * lockstep — there is no second tool list to drift.
  */
-export function createNiaMcpServer(sourceCtx?: McpSourceContext) {
+export function createClaraMcpServer(sourceCtx?: McpSourceContext) {
   return createSdkMcpServer({
     name: "clara",
     version: "0.1.0",
