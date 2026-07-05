@@ -48,14 +48,17 @@ def encode_file(path: str) -> str:
         return base64.b64encode(f.read()).decode("utf-8")
 
 
-def resolve_output_path(output: str | None, mime_type: str) -> Path:
+def resolve_output_path(output: str | None, mime_type: str, prompt: str) -> Path:
     ext = ".png" if "png" in mime_type else ".jpg"
+    filename_part = re.sub(r'[^\w\s-]', '', prompt[:30]).strip().replace(' ', '_').lower()
+    full_name = f"clara_{time.strftime(TIMESTAMP_FORMAT)}_{filename_part}{ext}"
+    
     if output:
         out = Path(output).expanduser()
         if out.suffix:
             return out
-        return out / f"nia_{time.strftime(TIMESTAMP_FORMAT)}{ext}"
-    return Path(f"/tmp/clara_{time.strftime(TIMESTAMP_FORMAT)}{ext}")
+        return out / full_name
+    return Path(f"/tmp/{full_name}")
 
 
 def read_config_key() -> str:

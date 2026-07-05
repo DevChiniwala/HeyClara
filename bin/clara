@@ -35,11 +35,11 @@ PACKAGE_DIR="$(dirname "$REAL")/.."
 ENTRY="$PACKAGE_DIR/src/cli/index.ts"
 
 if [ ! -f "$ENTRY" ]; then
-  ENTRY="$(npm root -g 2>/dev/null)/heyclara/src/cli/index.ts"
+  ENTRY="$(npm root -g 2>/dev/null)/@devchiniwala/heyclara/src/cli/index.ts"
 fi
 
 if [ ! -f "$ENTRY" ]; then
-  echo "Error: could not find heyclara. Try: npm i -g heyclara"
+  echo "Error: could not find heyclara. Try: npm i -g @devchiniwala/heyclara"
   exit 1
 fi
 

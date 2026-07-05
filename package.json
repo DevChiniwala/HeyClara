@@ -1,5 +1,5 @@
 {
-  "name": "heyclara",
+  "name": "@devchiniwala/heyclara",
   "version": "0.4.2",
   "description": "A personal AI assistant daemon — chat, scheduled jobs, persona system, extensible via skills.",
   "type": "module",
