@@ -5,7 +5,7 @@ import { getFactories, clearStarted, getChannel } from "../../src/channels/regis
 import { resetConfig } from "../../src/utils/config";
 import type { Channel } from "../../src/types";
 
-const TEST_DIR = "/tmp/test-nia-channels";
+const TEST_DIR = "/tmp/test-clara-channels";
 
 beforeEach(() => {
   mkdirSync(TEST_DIR, { recursive: true });

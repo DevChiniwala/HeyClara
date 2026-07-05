@@ -69,7 +69,7 @@ describe("Message model", () => {
       sessionId,
       room: TEST_ROOM,
       sender: "user",
-      content: "hello nia",
+      content: "hello clara",
       isFromAgent: false,
     });
 
@@ -79,7 +79,7 @@ describe("Message model", () => {
     `;
     expect(rows).toHaveLength(1);
     expect(rows[0].sender).toBe("user");
-    expect(rows[0].content).toBe("hello nia");
+    expect(rows[0].content).toBe("hello clara");
     expect(rows[0].is_from_agent).toBe(false);
   });
 
@@ -178,12 +178,12 @@ describe("Session.listRecent", () => {
 
 describe("Message.search", () => {
   test("finds messages by keyword", async () => {
-    const results = await Message.search("hello nia");
+    const results = await Message.search("hello clara");
     expect(results.length).toBeGreaterThanOrEqual(1);
     expect(results[0]).toHaveProperty("sessionId");
     expect(results[0]).toHaveProperty("room");
     expect(results[0]).toHaveProperty("content");
-    expect(results[0].content.toLowerCase()).toContain("hello nia");
+    expect(results[0].content.toLowerCase()).toContain("hello clara");
   });
 
   test("returns empty for non-matching query", async () => {

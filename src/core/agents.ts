@@ -2,7 +2,7 @@ import { existsSync, readFileSync, readdirSync } from "fs";
 import { join, resolve } from "path";
 import { homedir } from "os";
 import yaml from "js-yaml";
-import { getNiaHome } from "../utils/paths";
+import { getClaraHome } from "../utils/paths";
 import { log } from "../utils/log";
 import type { AgentInfo } from "../types/agent";
 
@@ -10,7 +10,7 @@ import type { AgentInfo } from "../types/agent";
 const PROJECT_ROOT = resolve(import.meta.dir, "../..");
 
 function getAgentDirs(): { dir: string; source: string }[] {
-  const niaHome = getNiaHome();
+  const niaHome = getClaraHome();
   const dirs: { dir: string; source: string }[] = [
     { dir: join(process.cwd(), "agents"), source: "cwd" },
     { dir: join(PROJECT_ROOT, "agents"), source: "project" },

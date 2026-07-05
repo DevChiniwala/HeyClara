@@ -3,7 +3,7 @@ import { mkdirSync, rmSync, writeFileSync } from "fs";
 import { loadIdentity, buildSystemPrompt, buildContextSuffix } from "../../src/chat/identity";
 import { resetConfig } from "../../src/utils/config";
 
-const TEST_DIR = "/tmp/test-nia-identity";
+const TEST_DIR = "/tmp/test-clara-identity";
 
 beforeEach(() => {
   mkdirSync(`${TEST_DIR}/self`, { recursive: true });
@@ -18,19 +18,19 @@ afterEach(() => {
 
 describe("loadIdentity", () => {
   test("loads both identity.md and soul.md", () => {
-    writeFileSync(`${TEST_DIR}/self/identity.md`, "I am nia");
+    writeFileSync(`${TEST_DIR}/self/identity.md`, "I am clara");
     writeFileSync(`${TEST_DIR}/self/soul.md`, "Be helpful");
 
     const result = loadIdentity();
-    expect(result).toContain("I am nia");
+    expect(result).toContain("I am clara");
     expect(result).toContain("Be helpful");
   });
 
   test("loads only identity.md when soul.md is missing", () => {
-    writeFileSync(`${TEST_DIR}/self/identity.md`, "I am nia");
+    writeFileSync(`${TEST_DIR}/self/identity.md`, "I am clara");
 
     const result = loadIdentity();
-    expect(result).toBe("I am nia");
+    expect(result).toBe("I am clara");
   });
 
   test("loads only soul.md when identity.md is missing", () => {
@@ -46,20 +46,20 @@ describe("loadIdentity", () => {
   });
 
   test("loads identity, owner, soul, rules, and memory files in order", () => {
-    writeFileSync(`${TEST_DIR}/self/identity.md`, "I am nia");
+    writeFileSync(`${TEST_DIR}/self/identity.md`, "I am clara");
     writeFileSync(`${TEST_DIR}/self/owner.md`, "Owner: Aman");
     writeFileSync(`${TEST_DIR}/self/soul.md`, "Be helpful");
     writeFileSync(`${TEST_DIR}/self/rules.md`, "Keep stamp short");
     writeFileSync(`${TEST_DIR}/self/memory.md`, "Learned: X");
 
     const result = loadIdentity();
-    expect(result).toContain("I am nia");
+    expect(result).toContain("I am clara");
     expect(result).toContain("Owner: Aman");
     expect(result).toContain("Be helpful");
     expect(result).toContain("Keep stamp short");
     expect(result).toContain("Learned: X");
     // Verify order: identity → owner → soul → rules → memory
-    expect(result.indexOf("I am nia")).toBeLessThan(result.indexOf("Owner: Aman"));
+    expect(result.indexOf("I am clara")).toBeLessThan(result.indexOf("Owner: Aman"));
     expect(result.indexOf("Owner: Aman")).toBeLessThan(result.indexOf("Be helpful"));
     expect(result.indexOf("Be helpful")).toBeLessThan(result.indexOf("Keep stamp short"));
     expect(result.indexOf("Keep stamp short")).toBeLessThan(result.indexOf("Learned: X"));
@@ -73,10 +73,10 @@ describe("loadIdentity", () => {
   });
 
   test("works without rules.md", () => {
-    writeFileSync(`${TEST_DIR}/self/identity.md`, "I am nia");
+    writeFileSync(`${TEST_DIR}/self/identity.md`, "I am clara");
 
     const result = loadIdentity();
-    expect(result).toBe("I am nia");
+    expect(result).toBe("I am clara");
     expect(result).not.toContain("rules");
   });
 
@@ -85,7 +85,7 @@ describe("loadIdentity", () => {
     writeFileSync(`${TEST_DIR}/self/soul.md`, "\n  Be helpful  \n");
 
     const result = loadIdentity();
-    expect(result).toContain("I am nia");
+    expect(result).toContain("I am clara");
     expect(result).toContain("Be helpful");
     expect(result).not.toMatch(/^\s/);
     expect(result).not.toMatch(/\s$/);
@@ -94,11 +94,11 @@ describe("loadIdentity", () => {
 
 describe("buildSystemPrompt", () => {
   test("includes identity content and chat instructions", () => {
-    writeFileSync(`${TEST_DIR}/self/identity.md`, "I am nia");
+    writeFileSync(`${TEST_DIR}/self/identity.md`, "I am clara");
     writeFileSync(`${TEST_DIR}/self/soul.md`, "Be helpful");
 
     const prompt = buildSystemPrompt();
-    expect(prompt).toContain("I am nia");
+    expect(prompt).toContain("I am clara");
     expect(prompt).toContain("Be helpful");
     expect(prompt).toContain("live chat session");
   });

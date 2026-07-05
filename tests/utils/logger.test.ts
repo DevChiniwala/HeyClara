@@ -3,7 +3,7 @@ import { mkdirSync, rmSync, readFileSync } from "fs";
 import { appendAudit, readAudit, readState, writeState } from "../../src/utils/logger";
 import type { AuditEntry, CronState } from "../../src/types";
 
-const TEST_DIR = "/tmp/test-nia-logger";
+const TEST_DIR = "/tmp/test-clara-logger";
 
 beforeEach(() => {
   mkdirSync(`${TEST_DIR}/tmp`, { recursive: true });

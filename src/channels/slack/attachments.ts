@@ -10,7 +10,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { join } from "path";
 import type { Attachment, AttachmentType } from "../../types";
 import { classifyMime, prepareImage, validateAttachment } from "../../utils/attachment";
-import { getNiaHome } from "../../utils/paths";
+import { getClaraHome } from "../../utils/paths";
 import { log } from "../../utils/log";
 
 interface CachedFile {
@@ -49,7 +49,7 @@ export class SlackAttachmentCache {
   private readonly fileIndex = new Map<string, CachedFile>();
 
   constructor(private readonly botToken: string) {
-    this.attachRoot = join(getNiaHome(), "tmp", "attachments");
+    this.attachRoot = join(getClaraHome(), "tmp", "attachments");
     mkdirSync(this.attachRoot, { recursive: true });
   }
 

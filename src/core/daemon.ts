@@ -164,7 +164,7 @@ async function bootstrapSystemJobs(): Promise<void> {
 
 export async function runDaemon(): Promise<void> {
   // Ensure we never pass nested-session env vars to SDK subprocesses,
-  // regardless of how the daemon was launched (nia start, clara run, etc.)
+  // regardless of how the daemon was launched (clara start, clara run, etc.)
   delete process.env.CLAUDECODE;
   delete process.env.CLAUDE_CODE_ENTRYPOINT;
   delete process.env.CLAUDE_AGENT_SDK_VERSION;
@@ -309,29 +309,29 @@ export async function runDaemon(): Promise<void> {
   // Listen for job changes via Postgres LISTEN/NOTIFY
   try {
     const sql = getSql();
-    await sql.listen("nia_jobs", async () => {
+    await sql.listen("clara_jobs", async () => {
       log.info("job change detected via NOTIFY, recomputing next runs");
       await recomputeAllNextRuns().catch((err) => {
         log.warn({ err }, "failed to recompute next runs on notify");
       });
     });
-    log.info("listening for job changes on nia_jobs channel");
+    log.info("listening for job changes on clara_jobs channel");
   } catch (err) {
-    log.warn({ err }, "could not subscribe to nia_jobs, falling back to SIGHUP only");
+    log.warn({ err }, "could not subscribe to clara_jobs, falling back to SIGHUP only");
   }
 
   // Listen for session finalization requests from CLI processes
   try {
     const sql = getSql();
-    await sql.listen("nia_finalize", async () => {
+    await sql.listen("clara_finalize", async () => {
       log.info("finalization request received via NOTIFY, processing pending");
       await processPending().catch((err) => {
         log.warn({ err }, "failed to process pending finalizations on notify");
       });
     });
-    log.info("listening for finalization requests on nia_finalize channel");
+    log.info("listening for finalization requests on clara_finalize channel");
   } catch (err) {
-    log.warn({ err }, "could not subscribe to nia_finalize");
+    log.warn({ err }, "could not subscribe to clara_finalize");
   }
 
   // Drain any finalization requests that arrived while daemon was down

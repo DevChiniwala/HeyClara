@@ -2,13 +2,13 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { startMcpEndpoint, stopMcpEndpoint, mintRun, revokeRun, liveRunCount } from "../../src/agent/mcp-endpoint";
-import type { NiaTool } from "../../src/mcp/tools/table";
+import type { ClaraTool } from "../../src/mcp/tools/table";
 import type { McpSourceContext } from "../../src/mcp";
 
 // A fake tool that records the frozen context it was invoked with — proves the
 // per-run closure routes correctly without touching the DB.
 let lastCtx: McpSourceContext | undefined;
-const echoTool: NiaTool = {
+const echoTool: ClaraTool = {
   name: "echo_ctx",
   description: "Echo the calling context room",
   schema: {},

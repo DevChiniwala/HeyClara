@@ -9,7 +9,7 @@ import { Message } from "../db/models";
 import { log } from "../utils/log";
 import { getMcpServers } from "../mcp";
 import { classifyMime, validateAttachment, prepareImage } from "../utils/attachment";
-import { getNiaHome } from "../utils/paths";
+import { getClaraHome } from "../utils/paths";
 import { chainLock, openChatEngine, rotateRoom } from "./common/chat-session";
 
 function safeExtension(filename?: string): string {
@@ -275,7 +275,7 @@ class TelegramChannel implements Channel {
     filename?: string,
   ): string {
     const scope = `telegram-${chatId}-${roomIndex}`;
-    const dir = join(getNiaHome(), "tmp", "attachments", scope);
+    const dir = join(getClaraHome(), "tmp", "attachments", scope);
     mkdirSync(dir, { recursive: true });
     const ext = cacheExtension(filename, mimeType);
     const hash = createHash("sha256").update(data).digest("hex").slice(0, 16);

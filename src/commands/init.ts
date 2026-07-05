@@ -2,7 +2,7 @@ import * as readline from "readline";
 import { existsSync, mkdirSync, readFileSync, writeFileSync, appendFileSync } from "fs";
 import { resolve } from "path";
 import { homedir } from "os";
-import { getNiaHome, getPaths } from "../utils/paths";
+import { getClaraHome, getPaths } from "../utils/paths";
 import { resetConfig } from "../utils/config";
 import { runMigrations } from "../db/migrate";
 import { closeDb } from "../db/connection";
@@ -81,7 +81,7 @@ function writeIfMissing(filePath: string, content: string, label: string): void 
 }
 
 export async function runInit(): Promise<void> {
-  const home = getNiaHome();
+  const home = getClaraHome();
   const paths = getPaths();
 
   console.log("Setting up clara...\n");
@@ -125,7 +125,7 @@ export async function runInit(): Promise<void> {
         const { dbSetup } = await import("./db");
         await dbSetup();
       } else {
-        console.log(`  (run 'nia db setup' later)\n`);
+        console.log(`  (run 'clara db setup' later)\n`);
       }
     }
     delete process.env.DATABASE_URL;
@@ -378,7 +378,7 @@ export async function runInit(): Promise<void> {
     const imagesDir = `${home}/images`;
     mkdirSync(imagesDir, { recursive: true });
     const hasUserReference = existsSync(`${imagesDir}/reference.webp`);
-    const hasDefaultReference = existsSync(`${SKILL_ASSETS_DIR}/nia-reference.webp`);
+    const hasDefaultReference = existsSync(`${SKILL_ASSETS_DIR}/clara-reference.webp`);
 
     if (geminiApiKey && !hasUserReference) {
       const setupVisual = await ask(rl, "\nGenerate a visual identity for your agent? (y/n)", "y");
@@ -437,10 +437,10 @@ export async function runInit(): Promise<void> {
         } else if (hasDefaultReference) {
           // No description — copy defaults
           const { copyFileSync } = await import("fs");
-          copyFileSync(`${SKILL_ASSETS_DIR}/nia-reference.webp`, `${imagesDir}/reference.webp`);
+          copyFileSync(`${SKILL_ASSETS_DIR}/clara-reference.webp`, `${imagesDir}/reference.webp`);
           console.log(`  \u2713 copied default reference image`);
-          if (existsSync(`${SKILL_ASSETS_DIR}/nia-profile.webp`)) {
-            copyFileSync(`${SKILL_ASSETS_DIR}/nia-profile.webp`, `${imagesDir}/profile.webp`);
+          if (existsSync(`${SKILL_ASSETS_DIR}/clara-profile.webp`)) {
+            copyFileSync(`${SKILL_ASSETS_DIR}/clara-profile.webp`, `${imagesDir}/profile.webp`);
             console.log(`  \u2713 copied default profile picture`);
           }
         }
@@ -540,7 +540,7 @@ export async function runInit(): Promise<void> {
         console.log(`\n  \u2713 installed system service (auto-restart on crash)`);
       } catch (err) {
         console.log(`\n  \u26a0 could not install system service: ${errMsg(err)}`);
-        console.log(`    run 'nia service install' manually for auto-restart`);
+        console.log(`    run 'clara service install' manually for auto-restart`);
       }
     } else {
       console.log(`\n  - system service already installed`);

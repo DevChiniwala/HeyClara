@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
-"""Shared Slack config helper. Reads creds from ~/.niahere/config.yaml."""
+"""Shared Slack config helper. Reads creds from ~/.heyclara/config.yaml."""
 
 import yaml
 import requests
 from pathlib import Path
 
-CONFIG_PATH = Path.home() / ".niahere" / "config.yaml"
+CONFIG_PATH = Path.home() / ".heyclara" / "config.yaml"
 
 _identity_cache = None
 
 def load_slack_config():
-    """Load Slack config from ~/.niahere/config.yaml."""
+    """Load Slack config from ~/.heyclara/config.yaml."""
     with open(CONFIG_PATH) as f:
         config = yaml.safe_load(f)
     slack = config["channels"]["slack"]

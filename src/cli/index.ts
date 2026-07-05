@@ -6,7 +6,7 @@ import { localTime } from "../utils/time";
 import { startRepl } from "../chat/repl";
 import { Message } from "../db/models";
 import { withDb } from "../db/with-db";
-import { getNiaHome, getPaths } from "../utils/paths";
+import { getClaraHome, getPaths } from "../utils/paths";
 import { errMsg } from "../utils/errors";
 import { fail, ICON_PASS, ICON_WARN } from "../utils/cli";
 import { jobCommand } from "./job";
@@ -35,7 +35,7 @@ const command = process.argv[2];
 
 // Ensure ~/.heyclara/ exists for commands that need it
 if (command && !["init", "help", "version", "-v", "--version", "-h", "--help"].includes(command)) {
-  mkdirSync(getNiaHome(), { recursive: true });
+  mkdirSync(getClaraHome(), { recursive: true });
 }
 
 const STARTUP_MARKERS: Record<string, string> = {
@@ -112,18 +112,18 @@ switch (command) {
     const pid = readPid();
     console.log(`clara starting${pid ? ` (pid: ${pid})` : ""}...`);
     await awaitStartup();
-    console.log("nia started");
+    console.log("clara started");
     break;
   }
 
   case "stop": {
-    if (!isRunning()) fail("nia is not running");
+    if (!isRunning()) fail("clara is not running");
     const stopGuard = parseGuardFlags(process.argv.slice(3));
     if (!(await guardActiveEngines("stop", stopGuard))) process.exit(1);
     const { unregisterService } = await import("../commands/service");
     await unregisterService({ force: stopGuard.force });
     stopDaemon({ force: stopGuard.force });
-    console.log("nia stopped");
+    console.log("clara stopped");
     break;
   }
 
@@ -161,7 +161,7 @@ switch (command) {
     const restartPid = readPid();
     console.log(`clara restarting${restartPid ? ` (pid: ${restartPid})` : ""}...`);
     await awaitStartup();
-    console.log("nia restarted");
+    console.log("clara restarted");
     break;
   }
 

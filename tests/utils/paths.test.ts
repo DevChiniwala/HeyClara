@@ -2,7 +2,7 @@ import { describe, expect, test, afterEach } from "bun:test";
 import { resolve } from "path";
 import { getPaths } from "../../src/utils/paths";
 
-const TEST_DIR = "/tmp/test-nia-paths";
+const TEST_DIR = "/tmp/test-clara-paths";
 
 afterEach(() => {
   delete process.env.CLARA_HOME;

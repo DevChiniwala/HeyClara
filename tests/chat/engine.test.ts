@@ -6,7 +6,7 @@ import { resolveSdkModel } from "../../src/agent";
 import { resetConfig } from "../../src/utils/config";
 import type { Attachment } from "../../src/types/attachment";
 
-const TEST_DIR = "/tmp/test-nia-chat-engine";
+const TEST_DIR = "/tmp/test-clara-chat-engine";
 
 beforeEach(() => {
   mkdirSync(TEST_DIR, { recursive: true });
@@ -201,7 +201,7 @@ describe("buildContentBlocks", () => {
       data: Buffer.from("img"),
       mimeType: "image/png",
       filename: "photo.png",
-      sourcePath: "/tmp/nia-attachment-photo.png",
+      sourcePath: "/tmp/clara-attachment-photo.png",
     };
 
     const result = buildContentBlocks("forward this", [attachment]);
@@ -211,7 +211,7 @@ describe("buildContentBlocks", () => {
     expect(blocks[0].type).toBe("text");
     expect(blocks[0].text).toContain("[Attachment local paths]");
     expect(blocks[0].text).toContain("photo.png (image, image/png)");
-    expect(blocks[0].text).toContain("/tmp/nia-attachment-photo.png");
+    expect(blocks[0].text).toContain("/tmp/clara-attachment-photo.png");
     expect(blocks[1].type).toBe("text");
     expect(blocks[1].text).toBe("forward this");
   });

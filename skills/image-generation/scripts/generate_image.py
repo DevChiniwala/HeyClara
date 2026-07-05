@@ -39,8 +39,8 @@ from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 SKILL_DIR = SCRIPT_DIR.parent
-NIA_HOME = Path(os.environ.get("NIA_HOME", Path.home() / ".niahere"))
-NIA_CONFIG = NIA_HOME / "config.yaml"
+CLARA_HOME = Path(os.environ.get("CLARA_HOME", Path.home() / ".heyclara"))
+CLARA_CONFIG = CLARA_HOME / "config.yaml"
 TIMESTAMP_FORMAT = "%Y%m%d_%H%M%S"
 
 # --- Provider defaults ---
@@ -117,19 +117,19 @@ def resolve_output_path(output: str | None, ext: str = ".png", index: int | None
 
 
 def read_config_key(key: str) -> str:
-    """Read a key from ~/.niahere/config.yaml."""
-    if not NIA_CONFIG.is_file():
+    """Read a key from ~/.heyclara/config.yaml."""
+    if not CLARA_CONFIG.is_file():
         return ""
     try:
         import importlib
 
         yaml = importlib.import_module("yaml")
-        with NIA_CONFIG.open("r") as f:
+        with CLARA_CONFIG.open("r") as f:
             config = yaml.safe_load(f)
         if config and isinstance(config, dict):
             return config.get(key, "") or ""
     except Exception:
-        for line in NIA_CONFIG.read_text().splitlines():
+        for line in CLARA_CONFIG.read_text().splitlines():
             if line.startswith(f"{key}:"):
                 val = line.split(":", 1)[1].strip().strip("'\"")
                 return val
@@ -396,7 +396,7 @@ Examples:
     parser.add_argument(
         "--api-key",
         default=None,
-        help="API key override. Otherwise reads from env var or ~/.niahere/config.yaml.",
+        help="API key override. Otherwise reads from env var or ~/.heyclara/config.yaml.",
     )
     args = parser.parse_args()
 
@@ -408,7 +408,7 @@ Examples:
         config_key = "openai_api_key" if provider == "openai" else "gemini_api_key"
         env_var = "OPENAI_API_KEY" if provider == "openai" else "GEMINI_API_KEY"
         raise SystemExit(
-            f"Missing API key. Provide --api-key, set {env_var} in environment, or add {config_key} to {NIA_CONFIG}."
+            f"Missing API key. Provide --api-key, set {env_var} in environment, or add {config_key} to {CLARA_CONFIG}."
         )
 
     if args.reference and not Path(args.reference).expanduser().is_file():

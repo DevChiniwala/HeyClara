@@ -1,12 +1,12 @@
 import { existsSync, readFileSync, readdirSync } from "fs";
 import { join } from "path";
 import yaml from "js-yaml";
-import { getNiaHome } from "../utils/paths";
+import { getClaraHome } from "../utils/paths";
 import { log } from "../utils/log";
 import type { EmployeeInfo } from "../types/employee";
 
 function getEmployeesDir(): string {
-  return join(getNiaHome(), "employees");
+  return join(getClaraHome(), "employees");
 }
 
 export function scanEmployees(): EmployeeInfo[] {

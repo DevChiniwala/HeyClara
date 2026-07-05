@@ -1,10 +1,14 @@
-import { describe, expect, test, afterEach } from "bun:test";
+import { describe, expect, test, afterEach, beforeEach } from "bun:test";
 import {
   activeHandleCount,
   closeAllActiveHandles,
   registerActiveHandle,
   unregisterActiveHandle,
 } from "../../src/core/active-handles";
+
+beforeEach(async () => {
+  await closeAllActiveHandles("test setup");
+});
 
 afterEach(async () => {
   await closeAllActiveHandles("test cleanup");

@@ -2,7 +2,7 @@ import { describe, expect, test, beforeEach, afterEach } from "bun:test";
 import { mkdirSync, writeFileSync, rmSync } from "fs";
 import { loadConfig, resetConfig } from "../../src/utils/config";
 
-const TEST_DIR = "/tmp/test-nia-config";
+const TEST_DIR = "/tmp/test-clara-config";
 
 beforeEach(() => {
   mkdirSync(TEST_DIR, { recursive: true });

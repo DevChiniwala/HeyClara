@@ -7,7 +7,7 @@ import { cacheMedia, readCachedMedia, getMediaDir } from "../../../src/channels/
 let tmp: string;
 
 beforeEach(() => {
-  tmp = mkdtempSync(join(tmpdir(), "nia-mc-"));
+  tmp = mkdtempSync(join(tmpdir(), "clara-mc-"));
   process.env.CLARA_HOME = tmp;
 });
 

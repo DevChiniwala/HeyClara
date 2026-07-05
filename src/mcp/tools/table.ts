@@ -1,8 +1,8 @@
 import { z } from "zod";
 import * as handlers from "./index";
-import type { NiaTool } from "./types";
+import type { ClaraTool } from "./types";
 
-export type { NiaTool };
+export type { ClaraTool };
 
 /**
  * One declarative tool table, consumed by both transports:
@@ -14,7 +14,7 @@ export type { NiaTool };
  * untouched; only `send_message` reads the per-run `McpSourceContext`.
  */
 
-export const CLARA_TOOLS: NiaTool[] = [
+export const CLARA_TOOLS: ClaraTool[] = [
   {
     name: "list_jobs",
     description: "List all scheduled jobs with status and next run time",

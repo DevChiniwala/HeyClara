@@ -55,7 +55,7 @@ describe("Playwright cloned profile runs", () => {
     async () => {
       expect(existsSync(SOURCE_PROFILE)).toBe(true);
 
-      const root = mkdtempSync(join(tmpdir(), "nia-pw-profile-clone-reconcile-"));
+      const root = mkdtempSync(join(tmpdir(), "clara-pw-profile-clone-reconcile-"));
       const home = join(root, "home");
       mkdirSync(join(home, ".shared"), { recursive: true });
       writeFileSync(
@@ -82,7 +82,7 @@ describe("Playwright cloned profile runs", () => {
             const page = context.pages()[0] || (await context.newPage());
             await page.goto(`data:text/html,<title>clone-${index}</title><h1>clone-${index}</h1>`);
             expect(await page.title()).toBe(`clone-${index}`);
-            writeFileSync(join(prepared[index].runDir, "nia-reconcile-marker.txt"), `clone-${index}`);
+            writeFileSync(join(prepared[index].runDir, "clara-reconcile-marker.txt"), `clone-${index}`);
           }),
         );
 
@@ -90,7 +90,7 @@ describe("Playwright cloned profile runs", () => {
         contexts = [];
 
         helper(["commit", "--run-id", prepared[1].runId], env);
-        expect(readFileSync(join(primary, "nia-reconcile-marker.txt"), "utf8")).toBe("clone-1");
+        expect(readFileSync(join(primary, "clara-reconcile-marker.txt"), "utf8")).toBe("clone-1");
 
         const reconciled = await launchProfile(primary);
         try {

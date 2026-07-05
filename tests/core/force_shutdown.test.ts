@@ -7,7 +7,7 @@ import {
   requestForceShutdown,
 } from "../../src/core/force-shutdown";
 
-const TEST_DIR = "/tmp/test-nia-force-shutdown";
+const TEST_DIR = "/tmp/test-clara-force-shutdown";
 
 beforeEach(() => {
   rmSync(TEST_DIR, { recursive: true, force: true });

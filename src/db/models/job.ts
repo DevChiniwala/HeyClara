@@ -82,7 +82,7 @@ function toJob(r: Record<string, any>): Job {
 
 async function notifyChange(): Promise<void> {
   const sql = getSql();
-  await sql`SELECT pg_notify('nia_jobs', '')`;
+  await sql`SELECT pg_notify('clara_jobs', '')`;
 }
 
 export async function create(

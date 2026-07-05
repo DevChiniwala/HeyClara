@@ -3,7 +3,7 @@
  *
  * All callers use finalizeSession() instead of calling consolidator/summarizer
  * directly. The function writes a row to finalization_requests and fires
- * pg_notify('nia_finalize') to wake the daemon. That's it — all processing
+ * pg_notify('clara_finalize') to wake the daemon. That's it — all processing
  * happens in the daemon via processPending().
  */
 
@@ -62,7 +62,7 @@ export async function finalizeSession(sessionId: string, room: string): Promise<
   `;
 
   // Wake the daemon
-  await sql.notify("nia_finalize", sessionId).catch((err) => {
+  await sql.notify("clara_finalize", sessionId).catch((err) => {
     log.warn({ err, sessionId }, "finalizer: pg_notify failed (daemon may not be running)");
   });
 }

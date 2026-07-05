@@ -20,7 +20,7 @@ from pathlib import Path
 SCRIPT_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = SCRIPT_DIR.parent
 CLARA_HOME = Path(os.environ.get("CLARA_HOME", Path.home() / ".heyclara"))
-NIA_CONFIG = CLARA_HOME / "config.yaml"
+CLARA_CONFIG = CLARA_HOME / "config.yaml"
 DEFAULT_MODEL = "gemini-3.1-flash-image-preview"
 PRO_MODEL = "gemini-3-pro-image-preview"
 BASIC_MODEL = "gemini-2.5-flash-image"
@@ -60,18 +60,18 @@ def resolve_output_path(output: str | None, mime_type: str) -> Path:
 
 def read_config_key() -> str:
     """Read gemini_api_key from heyclara config.yaml."""
-    if not NIA_CONFIG.is_file():
+    if not CLARA_CONFIG.is_file():
         return ""
     try:
         import importlib
         yaml = importlib.import_module("yaml")
-        with NIA_CONFIG.open("r") as f:
+        with CLARA_CONFIG.open("r") as f:
             config = yaml.safe_load(f)
         if config and isinstance(config, dict):
             return config.get("gemini_api_key", "") or ""
     except Exception:
         # Fall back to simple grep if PyYAML not available
-        for line in NIA_CONFIG.read_text().splitlines():
+        for line in CLARA_CONFIG.read_text().splitlines():
             if line.startswith("gemini_api_key:"):
                 val = line.split(":", 1)[1].strip().strip("'\"")
                 return val
@@ -191,7 +191,7 @@ def main() -> None:
         if not api_key:
             raise RuntimeError(
                 "Missing API key. Provide --api-key, set GEMINI_API_KEY env var, "
-                f"or add gemini_api_key to {NIA_CONFIG}."
+                f"or add gemini_api_key to {CLARA_CONFIG}."
             )
 
         # Resolve reference image: user's ~/.heyclara/images/reference.webp > skill default > none

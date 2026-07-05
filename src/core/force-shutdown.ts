@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "fs";
 import { dirname, join } from "path";
-import { getNiaHome } from "../utils/paths";
+import { getClaraHome } from "../utils/paths";
 
 const FORCE_MARKER_MAX_AGE_MS = 10 * 60 * 1000;
 
@@ -10,7 +10,7 @@ interface ForceShutdownMarker {
 }
 
 function markerPath(): string {
-  return join(getNiaHome(), "tmp", "force-shutdown.json");
+  return join(getClaraHome(), "tmp", "force-shutdown.json");
 }
 
 export function requestForceShutdown(pids: number[] = []): void {

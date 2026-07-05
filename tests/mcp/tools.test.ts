@@ -13,7 +13,7 @@ import {
 } from "../../src/mcp/tools";
 import { resetConfig } from "../../src/utils/config";
 
-const TEST_DIR = "/tmp/test-nia-mcp-tools";
+const TEST_DIR = "/tmp/test-clara-mcp-tools";
 
 beforeEach(() => {
   mkdirSync(`${TEST_DIR}/self`, { recursive: true });

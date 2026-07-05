@@ -1,11 +1,11 @@
 import { describe, expect, test, beforeEach, afterEach } from "bun:test";
 import { mkdirSync, rmSync, writeFileSync } from "fs";
-import { join } from "path";
+import { join, resolve } from "path";
 import { buildJobPrompt, getJobDir, resolveJobPrompt } from "../../src/core/job-prompt";
 import { resetConfig } from "../../src/utils/config";
 import type { JobInput } from "../../src/types";
 
-const TEST_DIR = "/tmp/test-nia-job-prompt";
+const TEST_DIR = resolve("/tmp/test-clara-job-prompt");
 
 beforeEach(() => {
   process.env.CLARA_HOME = TEST_DIR;

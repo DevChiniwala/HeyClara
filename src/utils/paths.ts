@@ -2,12 +2,12 @@ import { resolve } from "path";
 import { homedir } from "os";
 import type { Paths } from "../types";
 
-export function getNiaHome(): string {
+export function getClaraHome(): string {
   return process.env.CLARA_HOME || resolve(homedir(), ".heyclara");
 }
 
 export function getPaths(): Paths {
-  const home = getNiaHome();
+  const home = getClaraHome();
   return {
     home,
     pid: resolve(home, "tmp/clara.pid"),

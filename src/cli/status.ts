@@ -205,7 +205,7 @@ export async function statusCommand(argv: string[] = []): Promise<void> {
     return;
   }
 
-  console.log(`nia: ${running ? `running (pid: ${pid})` : "stopped"}`);
+  console.log(`clara: ${running ? `running (pid: ${pid})` : "stopped"}`);
   console.log("Channels:");
   console.log(
     `  telegram: ${channels.telegram.status}${

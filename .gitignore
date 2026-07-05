@@ -7,3 +7,4 @@ bun.lockb
 .playwright-mcp/
 .claude/
 .ruff_cache/
+.next/

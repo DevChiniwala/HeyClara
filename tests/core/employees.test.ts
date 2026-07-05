@@ -1,5 +1,6 @@
 import { describe, expect, test, beforeEach, afterEach } from "bun:test";
 import { mkdirSync, rmSync, writeFileSync } from "fs";
+import { resolve, join } from "path";
 import {
   scanEmployees,
   getEmployee,
@@ -9,9 +10,9 @@ import {
 } from "../../src/core/employees";
 import { resetConfig } from "../../src/utils/config";
 
-const TEST_DIR = "/tmp/test-nia-employees";
+const TEST_DIR = resolve("/tmp/test-clara-employees");
 
-function niaEmployees() {
+function claraEmployees() {
   return scanEmployees().filter((e) => e.source === "clara");
 }
 
@@ -33,7 +34,7 @@ describe("scanEmployees", () => {
       `${TEST_DIR}/employees/james/EMPLOYEE.md`,
       `---\nname: james\nproject: aicodeusage.com\nrepo: /tmp/aicodeusage\nrole: Chief of Staff\nmodel: opus\nstatus: active\nmaxSubEmployees: 3\ncreated: 2026-04-12\n---\n\nYou are James.`,
     );
-    const employees = niaEmployees();
+    const employees = claraEmployees();
     expect(employees).toHaveLength(1);
     expect(employees[0].name).toBe("james");
     expect(employees[0].project).toBe("aicodeusage.com");
@@ -47,13 +48,13 @@ describe("scanEmployees", () => {
 
   test("skips directories without EMPLOYEE.md", () => {
     mkdirSync(`${TEST_DIR}/employees/empty`, { recursive: true });
-    const employees = niaEmployees();
+    const employees = claraEmployees();
     expect(employees).toHaveLength(0);
   });
 
   test("skips files with invalid frontmatter", () => {
     writeFileSync(`${TEST_DIR}/employees/james/EMPLOYEE.md`, "no frontmatter here");
-    const employees = niaEmployees();
+    const employees = claraEmployees();
     expect(employees).toHaveLength(0);
   });
 });
@@ -83,7 +84,7 @@ describe("getEmployeeDir", () => {
       `---\nname: james\nproject: test\nrepo: /tmp/test\nrole: Dev\nstatus: active\nmaxSubEmployees: 3\ncreated: 2026-04-12\n---\n\nBody.`,
     );
     const dir = getEmployeeDir("james");
-    expect(dir).toBe(`${TEST_DIR}/employees/j-dir`);
+    expect(dir).toBe(join(TEST_DIR, "employees", "j-dir"));
   });
 });
 
@@ -128,7 +129,7 @@ describe("scanEmployees dirName", () => {
       `${TEST_DIR}/employees/j-dir/EMPLOYEE.md`,
       `---\nname: james\nproject: test\nrepo: /tmp/test\nrole: Dev\nstatus: active\nmaxSubEmployees: 3\ncreated: 2026-04-12\n---\n\nBody.`,
     );
-    const employees = niaEmployees();
+    const employees = claraEmployees();
     const emp = employees.find((e) => e.name === "james");
     expect(emp).toBeDefined();
     expect(emp!.dirName).toBe("j-dir");

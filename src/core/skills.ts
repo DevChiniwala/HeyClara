@@ -2,7 +2,7 @@ import { existsSync, readFileSync, readdirSync } from "fs";
 import { join, resolve } from "path";
 import { homedir } from "os";
 import yaml from "js-yaml";
-import { getNiaHome } from "../utils/paths";
+import { getClaraHome } from "../utils/paths";
 import { log } from "../utils/log";
 
 // heyclara project root (resolved from this file's location)
@@ -15,7 +15,7 @@ export const SDK_SKILLS_SETTING = "all" as const;
 const SKILL_DIRS: { dir: string; source: string }[] = [
   { dir: join(process.cwd(), "skills"), source: "cwd" },
   { dir: join(PROJECT_ROOT, "skills"), source: "project" },
-  { dir: join(getNiaHome(), "skills"), source: "clara" },
+  { dir: join(getClaraHome(), "skills"), source: "clara" },
   { dir: join(homedir(), ".shared", "skills"), source: "shared" },
   { dir: join(homedir(), ".claude", "skills"), source: "claude" },
   { dir: join(homedir(), ".codex", "skills"), source: "codex" },

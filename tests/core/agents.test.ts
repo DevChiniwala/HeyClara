@@ -3,11 +3,11 @@ import { mkdirSync, rmSync, writeFileSync } from "fs";
 import { scanAgents, getAgentsSummary, getAgentDefinitions } from "../../src/core/agents";
 import { resetConfig } from "../../src/utils/config";
 
-const TEST_DIR = "/tmp/test-nia-agents";
+const TEST_DIR = "/tmp/test-clara-agents";
 
 // The scanner also picks up agents from cwd and PROJECT_ROOT.
 // Tests filter by source="clara" to isolate test agents from project agents.
-function niaAgents() {
+function claraAgents() {
   return scanAgents().filter((a) => a.source === "clara");
 }
 
@@ -29,7 +29,7 @@ describe("scanAgents", () => {
       `${TEST_DIR}/agents/marketer/AGENT.md`,
       `---\nname: test-marketer\ndescription: Marketing specialist\nmodel: sonnet\n---\n\nYou handle marketing.`,
     );
-    const agents = niaAgents();
+    const agents = claraAgents();
     expect(agents).toHaveLength(1);
     expect(agents[0].name).toBe("test-marketer");
     expect(agents[0].description).toBe("Marketing specialist");
@@ -39,13 +39,13 @@ describe("scanAgents", () => {
 
   test("skips directories without AGENT.md", () => {
     mkdirSync(`${TEST_DIR}/agents/empty`, { recursive: true });
-    const agents = niaAgents();
+    const agents = claraAgents();
     expect(agents).toHaveLength(0);
   });
 
   test("skips files with invalid frontmatter", () => {
     writeFileSync(`${TEST_DIR}/agents/marketer/AGENT.md`, "no frontmatter here");
-    const agents = niaAgents();
+    const agents = claraAgents();
     expect(agents).toHaveLength(0);
   });
 
@@ -55,7 +55,7 @@ describe("scanAgents", () => {
       `${TEST_DIR}/agents/test-fallback/AGENT.md`,
       `---\ndescription: Fallback test\n---\n\nYou handle testing.`,
     );
-    const agents = niaAgents();
+    const agents = claraAgents();
     const fallback = agents.find((a) => a.name === "test-fallback");
     expect(fallback).toBeDefined();
     expect(fallback!.name).toBe("test-fallback");

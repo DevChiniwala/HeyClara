@@ -3,7 +3,7 @@ import { mkdirSync, rmSync } from "fs";
 import { resetConfig } from "../../src/utils/config";
 import { getEnvironmentPrompt, getModePrompt, getChannelPrompt } from "../../src/prompts";
 
-const TEST_DIR = "/tmp/test-nia-prompts";
+const TEST_DIR = "/tmp/test-clara-prompts";
 
 beforeEach(() => {
   mkdirSync(TEST_DIR, { recursive: true });

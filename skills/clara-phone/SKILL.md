@@ -98,19 +98,19 @@ restart. For a persistent deploy:
 ```bash
 brew install cloudflared
 cloudflared tunnel login                          # opens browser, writes cert.pem
-cloudflared tunnel create nia-mac                 # creates the tunnel
-cloudflared tunnel route dns nia-mac clara.example.com   # CNAME on a Cloudflare-managed domain
+cloudflared tunnel create clara-mac                 # creates the tunnel
+cloudflared tunnel route dns clara-mac clara.example.com   # CNAME on a Cloudflare-managed domain
 ```
 
-Keep nia's tunnel config in nia's home as a single flat file:
+Keep clara's tunnel config in clara's home as a single flat file:
 `~/.heyclara/cloudflared-config.yaml`. The cloudflared-internal artifacts
 (`cert.pem`, the per-tunnel credentials JSON written by `tunnel create`)
 stay where cloudflared put them — those are cloudflared's territory, not
-nia's.
+clara's.
 
 ```yaml
 # ~/.heyclara/cloudflared-config.yaml
-tunnel: nia-mac
+tunnel: clara-mac
 credentials-file: /Users/<you>/.cloudflared/<tunnel-id>.json
 
 ingress:

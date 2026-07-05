@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from "fs";
 import { resolve, dirname } from "path";
-import { getNiaHome } from "./paths";
+import { getClaraHome } from "./paths";
 
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
 const PACKAGE_NAME = "heyclara";
@@ -11,7 +11,7 @@ type UpdateCache = {
 };
 
 function cachePath(): string {
-  return resolve(getNiaHome(), "tmp/update-check.json");
+  return resolve(getClaraHome(), "tmp/update-check.json");
 }
 
 function readCache(): UpdateCache | null {

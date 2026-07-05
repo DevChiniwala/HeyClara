@@ -1,7 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { randomBytes, randomUUID } from "crypto";
-import type { NiaTool } from "../mcp/tools/types";
+import type { ClaraTool } from "../mcp/tools/types";
 import type { McpSourceContext } from "../mcp";
 import { log } from "../utils/log";
 
@@ -28,10 +28,10 @@ let server: ReturnType<typeof Bun.serve> | null = null;
 let port = 0;
 // Injected by the daemon (the composition root) so this module never imports the
 // tool table — which would create a cycle (handlers → runner → agent → here).
-let endpointTools: NiaTool[] = [];
+let endpointTools: ClaraTool[] = [];
 
 /** Build a per-run MCP server whose tool closures bake in the frozen context. */
-function buildRunServer(ctx: McpSourceContext, tools: NiaTool[]): McpServer {
+function buildRunServer(ctx: McpSourceContext, tools: ClaraTool[]): McpServer {
   const mcp = new McpServer({ name: "clara", version: "0.1.0" });
   for (const t of tools) {
     mcp.registerTool(t.name, { description: t.description, inputSchema: t.schema }, async (args: unknown) => ({
@@ -42,7 +42,7 @@ function buildRunServer(ctx: McpSourceContext, tools: NiaTool[]): McpServer {
 }
 
 /** Start the loopback endpoint (idempotent). The daemon passes `CLARA_TOOLS`. */
-export async function startMcpEndpoint(tools: NiaTool[] = []): Promise<void> {
+export async function startMcpEndpoint(tools: ClaraTool[] = []): Promise<void> {
   endpointTools = tools;
   if (server) return;
   server = Bun.serve({
@@ -77,7 +77,7 @@ export function stopMcpEndpoint(): void {
  * token to hand to the CLI backend (e.g. `mcp_servers.clara.url` + a bearer env
  * var). Throws if the endpoint isn't started.
  */
-export async function mintRun(ctx: McpSourceContext, tools?: NiaTool[]): Promise<{ url: string; token: string }> {
+export async function mintRun(ctx: McpSourceContext, tools?: ClaraTool[]): Promise<{ url: string; token: string }> {
   if (!server) throw new Error("mcp-endpoint not started");
   const token = randomBytes(32).toString("base64url");
   const mcp = buildRunServer(ctx, tools ?? endpointTools);

@@ -116,7 +116,7 @@ function buildUnit(): string {
   const workingDir = resolve(cliPath, "../../..");
 
   return `[Unit]
-Description=nia personal AI assistant
+Description=clara personal AI assistant
 After=network.target
 
 [Service]

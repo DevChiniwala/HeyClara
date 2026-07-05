@@ -3,7 +3,7 @@ import { mkdirSync, rmSync, writeFileSync } from "fs";
 import { join, resolve } from "path";
 import { resolveWatchBehavior } from "../../src/utils/watches";
 
-const TEST_HOME = "/tmp/test-nia-watches";
+const TEST_HOME = "/tmp/test-clara-watches";
 
 function writeBehavior(name: string, content: string): string {
   const dir = join(TEST_HOME, "watches", name);

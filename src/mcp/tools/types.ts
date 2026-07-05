@@ -6,7 +6,7 @@ import type { McpSourceContext } from "../index";
  * tool table and the loopback MCP endpoint can reference the type without
  * pulling the handler → scheduler → runner → agent chain into a cycle.
  */
-export interface NiaTool {
+export interface ClaraTool {
   name: string;
   description: string;
   /** A zod raw shape (the object of field schemas), as the SDK `tool()` expects. */

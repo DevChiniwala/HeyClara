@@ -5,7 +5,7 @@ import { mkdtempSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 
-const TEST_CWD = mkdtempSync(join(tmpdir(), "nia-sdk-integration-"));
+const TEST_CWD = mkdtempSync(join(tmpdir(), "clara-sdk-integration-"));
 const runClaudeIntegration = process.env.CLARA_RUN_CLAUDE_INTEGRATION === "1";
 const describeClaudeIntegration = runClaudeIntegration ? describe : describe.skip;
 

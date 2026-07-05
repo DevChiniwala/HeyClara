@@ -14,7 +14,7 @@
 import { mkdir, readdir, readFile, stat, unlink, writeFile } from "fs/promises";
 import { createHash } from "crypto";
 import { join } from "path";
-import { getNiaHome } from "../../utils/paths";
+import { getClaraHome } from "../../utils/paths";
 import { log } from "../../utils/log";
 
 const MAX_FILES = 100;
@@ -37,7 +37,7 @@ const MIME_TO_EXT: Record<string, string> = {
 const FILENAME_RE = /^[a-f0-9]{16,64}\.[a-z0-9]{1,8}$/i;
 
 export function getMediaDir(): string {
-  return join(getNiaHome(), "tmp", "outbound");
+  return join(getClaraHome(), "tmp", "outbound");
 }
 
 export interface CachedMedia {

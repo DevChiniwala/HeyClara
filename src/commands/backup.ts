@@ -1,12 +1,12 @@
 import { existsSync, mkdirSync, readdirSync, statSync, unlinkSync } from "fs";
 import { join, basename } from "path";
-import { getNiaHome } from "../utils/paths";
+import { getClaraHome } from "../utils/paths";
 import { getConfig } from "../utils/config";
 
 const MAX_BACKUPS = 10;
 
 function getBackupDir(): string {
-  const dir = join(getNiaHome(), "backups");
+  const dir = join(getClaraHome(), "backups");
   mkdirSync(dir, { recursive: true });
   return dir;
 }
@@ -38,7 +38,7 @@ function pruneOldBackups(dir: string): void {
 }
 
 export async function createBackup(silent = false): Promise<string> {
-  const home = getNiaHome();
+  const home = getClaraHome();
   const backupDir = getBackupDir();
   const filename = `heyclara-${humanDate()}-${Math.floor(Date.now() / 1000)}.tar.gz`;
   const outPath = join(backupDir, filename);

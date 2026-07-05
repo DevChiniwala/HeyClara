@@ -36,9 +36,9 @@ async function waitForCondition(assertion: () => boolean, label: string): Promis
   }
 }
 
-describe("playwright profile clone helper", () => {
+describe.skipIf(process.platform === "win32")("playwright profile clone helper", () => {
   test("prepare seeds ~/.shared/playwright-user-profile from configured profile when canonical profile is missing", () => {
-    const home = mkdtempSync(join(tmpdir(), "nia-pw-helper-home-"));
+    const home = mkdtempSync(join(tmpdir(), "clara-pw-helper-home-"));
     try {
       const configuredProfile = join(home, "configured-profile");
       mkdirSync(configuredProfile, { recursive: true });
@@ -65,7 +65,7 @@ describe("playwright profile clone helper", () => {
   });
 
   test("commit reconciles a run profile back to the canonical profile and creates a backup", () => {
-    const home = mkdtempSync(join(tmpdir(), "nia-pw-helper-home-"));
+    const home = mkdtempSync(join(tmpdir(), "clara-pw-helper-home-"));
     try {
       const primary = join(home, ".shared", "playwright-user-profile");
       mkdirSync(primary, { recursive: true });
@@ -91,7 +91,7 @@ describe("playwright profile clone helper", () => {
   });
 
   test("open launches Chrome with a cloned profile and unique CDP URL", async () => {
-    const home = mkdtempSync(join(tmpdir(), "nia-pw-helper-home-"));
+    const home = mkdtempSync(join(tmpdir(), "clara-pw-helper-home-"));
     const chromeArgs = join(home, "chrome-args.txt");
     const mockChrome = join(home, "mock-chrome.sh");
     try {
@@ -129,7 +129,7 @@ describe("playwright profile clone helper", () => {
   });
 
   test("open commits and cleans up the cloned profile when Chrome exits by default", async () => {
-    const home = mkdtempSync(join(tmpdir(), "nia-pw-helper-home-"));
+    const home = mkdtempSync(join(tmpdir(), "clara-pw-helper-home-"));
     const mockChrome = join(home, "mock-chrome.sh");
     try {
       const primary = join(home, ".shared", "playwright-user-profile");
@@ -158,7 +158,7 @@ describe("playwright profile clone helper", () => {
   });
 
   test("close terminates the tracked browser and waits for close handling", async () => {
-    const home = mkdtempSync(join(tmpdir(), "nia-pw-helper-home-"));
+    const home = mkdtempSync(join(tmpdir(), "clara-pw-helper-home-"));
     const mockChrome = join(home, "mock-chrome.sh");
     try {
       const primary = join(home, ".shared", "playwright-user-profile");
@@ -188,7 +188,7 @@ describe("playwright profile clone helper", () => {
   });
 
   test("close with --wait leaves kept runs for manual commit or cleanup", () => {
-    const home = mkdtempSync(join(tmpdir(), "nia-pw-helper-home-"));
+    const home = mkdtempSync(join(tmpdir(), "clara-pw-helper-home-"));
     const mockChrome = join(home, "mock-chrome.sh");
     try {
       const primary = join(home, ".shared", "playwright-user-profile");
@@ -216,7 +216,7 @@ describe("playwright profile clone helper", () => {
   });
 
   test("prepare prunes oldest run profiles when PLAYWRIGHT_PROFILE_MAX_RUNS is exceeded", () => {
-    const home = mkdtempSync(join(tmpdir(), "nia-pw-helper-home-"));
+    const home = mkdtempSync(join(tmpdir(), "clara-pw-helper-home-"));
     try {
       const primary = join(home, ".shared", "playwright-user-profile");
       mkdirSync(primary, { recursive: true });
@@ -237,7 +237,7 @@ describe("playwright profile clone helper", () => {
   });
 
   test("automatic run profile pruning can be disabled", () => {
-    const home = mkdtempSync(join(tmpdir(), "nia-pw-helper-home-"));
+    const home = mkdtempSync(join(tmpdir(), "clara-pw-helper-home-"));
     try {
       const primary = join(home, ".shared", "playwright-user-profile");
       mkdirSync(primary, { recursive: true });

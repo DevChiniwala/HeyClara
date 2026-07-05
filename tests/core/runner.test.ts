@@ -6,7 +6,7 @@ import { readState, writeState } from "../../src/utils/logger";
 import { resetConfig } from "../../src/utils/config";
 import type { JobInput } from "../../src/types";
 
-const TEST_DIR = "/tmp/test-nia-runner";
+const TEST_DIR = "/tmp/test-clara-runner";
 
 beforeEach(() => {
   mkdirSync(`${TEST_DIR}/tmp`, { recursive: true });

@@ -3,7 +3,7 @@ import { mkdirSync, rmSync, readFileSync } from "fs";
 import { modelCommand } from "../../src/cli/model";
 import { resetConfig } from "../../src/utils/config";
 
-const TEST_DIR = "/tmp/test-nia-model-cli";
+const TEST_DIR = "/tmp/test-clara-model-cli";
 
 beforeEach(() => {
   rmSync(TEST_DIR, { recursive: true, force: true });

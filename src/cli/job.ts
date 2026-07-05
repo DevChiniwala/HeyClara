@@ -110,7 +110,7 @@ export async function jobCommand(): Promise<void> {
             }
             if (archived.length > 0) {
               console.log(
-                `\n  ${archived.length} archived job${archived.length > 1 ? "s" : ""} (nia job list --all to show)`,
+                `\n  ${archived.length} archived job${archived.length > 1 ? "s" : ""} (clara job list --all to show)`,
               );
             }
           }

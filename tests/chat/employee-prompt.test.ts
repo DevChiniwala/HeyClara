@@ -3,7 +3,7 @@ import { mkdirSync, rmSync, writeFileSync } from "fs";
 import { buildEmployeePrompt } from "../../src/chat/employee-prompt";
 import { resetConfig } from "../../src/utils/config";
 
-const TEST_DIR = "/tmp/test-nia-emp-prompt";
+const TEST_DIR = "/tmp/test-clara-emp-prompt";
 
 beforeEach(() => {
   mkdirSync(`${TEST_DIR}/employees/james/onboarding`, { recursive: true });
