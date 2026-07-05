@@ -1,0 +1,112 @@
+import { describe, expect, test } from "bun:test";
+import sharp from "sharp";
+import { classifyMime, validateAttachment, prepareImage } from "../../src/utils/attachment";
+
+describe("classifyMime", () => {
+  test("classifies image types", () => {
+    expect(classifyMime("image/jpeg")).toBe("image");
+    expect(classifyMime("image/png")).toBe("image");
+    expect(classifyMime("image/gif")).toBe("image");
+    expect(classifyMime("image/webp")).toBe("image");
+  });
+
+  test("classifies document types", () => {
+    expect(classifyMime("text/plain")).toBe("document");
+    expect(classifyMime("text/markdown")).toBe("document");
+    expect(classifyMime("text/csv")).toBe("document");
+    expect(classifyMime("text/html")).toBe("document");
+    expect(classifyMime("application/json")).toBe("document");
+    expect(classifyMime("application/pdf")).toBe("document");
+  });
+
+  test("classifies unknown text/* as document", () => {
+    expect(classifyMime("text/xml")).toBe("document");
+    expect(classifyMime("text/javascript")).toBe("document");
+  });
+
+  test("classifies other MIME types as generic files", () => {
+    expect(classifyMime("video/mp4")).toBe("file");
+    expect(classifyMime("audio/mpeg")).toBe("file");
+    expect(classifyMime("application/octet-stream")).toBe("file");
+    expect(classifyMime("application/zip")).toBe("file");
+  });
+});
+
+describe("validateAttachment", () => {
+  test("accepts a small payload", () => {
+    expect(validateAttachment(Buffer.alloc(1024))).toBeNull();
+  });
+
+  test("rejects payloads over 50MB", () => {
+    const error = validateAttachment(Buffer.alloc(51 * 1024 * 1024));
+    expect(error).toContain("too large");
+    expect(error).toContain("51.0MB");
+    expect(error).toContain("max 50MB");
+  });
+
+  test("accepts payloads exactly at 50MB", () => {
+    expect(validateAttachment(Buffer.alloc(50 * 1024 * 1024))).toBeNull();
+  });
+});
+
+describe("prepareImage", () => {
+  async function makeTestImage(
+    width: number,
+    height: number,
+    format: "png" | "jpeg" | "webp" = "png",
+  ): Promise<Buffer> {
+    return sharp({ create: { width, height, channels: 3, background: { r: 255, g: 0, b: 0 } } })
+      .toFormat(format)
+      .toBuffer();
+  }
+
+  test("small image passes through with jpeg conversion", async () => {
+    const input = await makeTestImage(200, 200, "png");
+    const { data, mimeType } = await prepareImage(input, "image/png");
+
+    expect(mimeType).toBe("image/jpeg");
+    expect(data.length).toBeLessThan(input.length); // JPEG smaller than PNG for solid color
+  });
+
+  test("large image is resized down", async () => {
+    const input = await makeTestImage(3000, 2000);
+    const { data, mimeType } = await prepareImage(input, "image/png");
+
+    const meta = await sharp(data).metadata();
+    expect(meta.width).toBeLessThanOrEqual(1568);
+    expect(meta.height).toBeLessThanOrEqual(1568);
+    expect(mimeType).toBe("image/jpeg");
+  });
+
+  test("image at max dimension is not enlarged", async () => {
+    const input = await makeTestImage(1568, 1000);
+    const { data } = await prepareImage(input, "image/png");
+
+    const meta = await sharp(data).metadata();
+    expect(meta.width).toBe(1568);
+    expect(meta.height).toBe(1000);
+  });
+
+  test("already small jpeg is recompressed", async () => {
+    const input = await makeTestImage(100, 100, "jpeg");
+    const { data, mimeType } = await prepareImage(input, "image/jpeg");
+
+    expect(mimeType).toBe("image/jpeg");
+    expect(data.length).toBeGreaterThan(0);
+  });
+
+  test("gif is passed through without modification", async () => {
+    const fakeGif = Buffer.from("GIF89a fake gif data");
+    const { data, mimeType } = await prepareImage(fakeGif, "image/gif");
+
+    expect(mimeType).toBe("image/gif");
+    expect(data).toBe(fakeGif); // same reference, not copied
+  });
+
+  test("webp is converted to jpeg", async () => {
+    const input = await makeTestImage(400, 300, "webp");
+    const { mimeType } = await prepareImage(input, "image/webp");
+
+    expect(mimeType).toBe("image/jpeg");
+  });
+});
