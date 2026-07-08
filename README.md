@@ -1,163 +1,224 @@
-# clara
+<div align="center">
+  <img src="https://raw.githubusercontent.com/DevChiniwala/HeyClara/main/skills/clara-image/assets/clara-profile.webp" width="150" height="150" alt="HeyClara Logo" style="border-radius: 50%;" />
+  <h1>HeyClara 🧠</h1>
+  <p><strong>A personal AI agent you fork, mold, and make your own.</strong></p>
 
-[![npm version](https://img.shields.io/npm/v/@devchiniwala/heyclara.svg)](https://www.npmjs.com/package/@devchiniwala/heyclara)
-[![npm downloads](https://img.shields.io/npm/dm/@devchiniwala/heyclara.svg)](https://www.npmjs.com/package/@devchiniwala/heyclara)
-[![license](https://img.shields.io/npm/l/@devchiniwala/heyclara.svg)](https://github.com/DevChiniwala/HeyClara/blob/main/LICENSE)
+  <p>
+    <a href="https://www.npmjs.com/package/@devchiniwala/heyclara"><img src="https://img.shields.io/npm/v/@devchiniwala/heyclara.svg?style=for-the-badge&color=blue" alt="NPM Version" /></a>
+    <a href="https://www.npmjs.com/package/@devchiniwala/heyclara"><img src="https://img.shields.io/npm/dm/@devchiniwala/heyclara.svg?style=for-the-badge&color=green" alt="NPM Downloads" /></a>
+    <a href="https://bun.sh/"><img src="https://img.shields.io/badge/Runtime-Bun-black?style=for-the-badge&logo=bun" alt="Bun Runtime" /></a>
+    <a href="https://github.com/DevChiniwala/HeyClara/blob/main/LICENSE"><img src="https://img.shields.io/npm/l/@devchiniwala/heyclara.svg?style=for-the-badge&color=yellow" alt="License" /></a>
+  </p>
+</div>
 
-A personal AI agent you fork and make your own. Small enough to understand, built for one user. Powered by Claude Agent SDK.
+---
 
-- npm package: [`heyclara`](https://www.npmjs.com/package/@devchiniwala/heyclara)
-- CLI command: `clara`
-- Website: [heyclara.com](https://heyclara.com)
+**HeyClara** is a personal AI assistant daemon powered by the Claude Agent SDK. It runs scheduled jobs, chats with you across Telegram, Slack, Terminal, and Voice, and manages a deep persona system with on-demand memory consolidation.
 
-## Philosophy
+Unlike bloated enterprise platforms, HeyClara is built for **one user**. It is small enough to understand, runs as a single background daemon, and acts as your personalized co-founder.
 
-**Small enough to understand.** One process, a few source files. No microservices, no message queues, no abstraction layers. Have Claude Code walk you through it.
+## 🌟 Philosophy
 
-**Built for one user.** This isn't a framework. It's working software that fits your exact needs. You fork it and have Claude Code make it match your exact needs.
+- **Small enough to understand:** One process, a few source files. No microservices, no message queues.
+- **Customization = Code Changes:** Want different behavior? Modify the code. The codebase is deliberately tiny so it's safe to change.
+- **AI-Native:** No complex dashboards. You configure and debug by talking to Clara.
+- **Skills over features:** Instead of cramming the core codebase with features, you add lightweight Markdown `SKILL.md` folders (like `/add-discord`) that transform your fork.
 
-**Customization = code changes.** No configuration sprawl. Want different behavior? Modify the code. The codebase is small enough that this is safe.
+---
 
-**AI-native.** No installation wizard; Claude Code guides setup. No monitoring dashboard; ask Claude what's happening. No debugging tools; describe the problem, Claude fixes it.
+## 🏗 System Architecture
 
-**Skills over features.** Contributors shouldn't add features to the codebase. Instead, they contribute claude code skills like `/add-discord` that transform your fork. You end up with clean code that does exactly what you need.
+The heart of HeyClara is a Bun.js daemon that connects an intelligent routing engine to your external channels (Slack, Telegram, Twilio Voice/SMS) while continuously persisting data to PostgreSQL. 
 
-**Best harness, best model.** This runs on Claude Agent SDK, which means you're running Claude Code directly. The harness matters. A bad harness makes even smart models seem dumb, a good harness gives them superpowers.
+```mermaid
+graph TD
+    %% Styling
+    classDef user stroke-width:2px,stroke:#3b82f6,fill:#eff6ff
+    classDef daemon stroke-width:2px,stroke:#8b5cf6,fill:#f3e8ff
+    classDef ai stroke-width:2px,stroke:#10b981,fill:#ecfdf5
+    classDef db stroke-width:2px,stroke:#f59e0b,fill:#fffbeb
 
-## Quick Start
+    %% Nodes
+    User(("🧑‍💻 You")):::user
+    
+    subgraph "External Channels"
+        Slack["📱 Slack (Bolt)"]:::user
+        Telegram["✈️ Telegram (grammY)"]:::user
+        Voice["📞 Voice & SMS (Twilio)"]:::user
+        CLI["💻 Terminal REPL"]:::user
+    end
+
+    subgraph "HeyClara Daemon (Bun.js)"
+        Router{"Message Router"}:::daemon
+        Engine["🧠 Chat Engine"]:::daemon
+        Scheduler["⏰ Job Scheduler (Crons)"]:::daemon
+        MCP["🛠️ MCP Tools (21+ Skills)"]:::daemon
+        Memory["📚 2-Stage Memory Consolidator"]:::daemon
+    end
+    
+    subgraph "AI Brain"
+        Claude["🤖 Claude Agent SDK"]:::ai
+        Agents["👥 Subagents (Marketer, Dev)"]:::ai
+    end
+
+    subgraph "Persistence"
+        PG[("🐘 PostgreSQL")]:::db
+        FS[("📁 ~/.heyclara/ Config")]:::db
+    end
+
+    %% Connections
+    User --> Slack & Telegram & Voice & CLI
+    Slack & Telegram & Voice & CLI --> Router
+    Router --> Engine
+    Scheduler -.-> Engine
+    
+    Engine <--> Claude
+    Claude <--> Agents
+    Claude <--> MCP
+    
+    Engine --> Memory
+    Memory --> PG & FS
+    MCP --> PG & FS
+    
+    %% Config Loading
+    FS -.-> Engine
+```
+
+---
+
+## ⚡ Data Flow: Message Lifecycle
+
+How HeyClara processes an incoming message and remembers it forever.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor User as You (Telegram/Slack)
+    participant Channel as Channel Adapter
+    participant Engine as Chat Engine
+    participant Claude as Claude SDK
+    participant Tools as MCP Tools
+    participant DB as PostgreSQL
+    participant Memory as Consolidator (Background)
+
+    User->>Channel: "Remind me I love coffee"
+    Channel->>Engine: Forward Payload
+    Engine->>DB: Load Session & Memory Context
+    Engine->>Claude: System Prompt + History
+    
+    rect rgb(236, 253, 245)
+        Claude->>Tools: Invoke `add_memory` tool
+        Tools->>DB: Save fact to `memory.md`
+        Tools-->>Claude: Confirm success
+    end
+    
+    Claude-->>Engine: Stream text response
+    Engine-->>Channel: Stream to UI (Typing indicator)
+    Channel-->>User: "Got it! Added to memory."
+    
+    Note over Engine, Memory: User goes idle for 5 mins
+    Engine->>Memory: Trigger Session Finalization
+    Memory->>DB: Extract deep insights & summarize session
+```
+
+---
+
+## 🚀 Quick Start
+
+Ensure you have [Bun](https://bun.sh) and PostgreSQL installed on your system.
 
 ```bash
-npm i -g @devchiniwala/heyclara        # installs globally (prompts to install Bun if missing)
-clara init                # guided setup (database, channels, persona, visual identity)
-clara start               # starts daemon + registers OS service
+# 1. Install globally
+npm i -g @devchiniwala/heyclara
+
+# 2. Interactive setup (wizard guides you through DB, API keys, and persona)
+clara init
+
+# 3. Start the background daemon!
+clara start
 ```
 
-## What It Supports
+---
 
-- **Telegram** — message your agent from your phone, typing indicator while processing
-- **Slack** — Socket Mode bot with thread awareness, thinking emoji, watch channels for proactive monitoring
-- **Phone (voice)** — Twilio + OpenAI Realtime. Inbound calls from allowlisted contacts and outbound calls via `place_call` MCP tool. Scheduled jobs can dial you (morning standup, evening retro, escalation). See `/clara-phone` skill.
-- **SMS** — Twilio Messaging on the same number. Inbound webhook → chat engine → REST reply. Reachability fallback when data is unavailable but cellular works (treks, basements, patchy zones).
-- **WhatsApp** — Twilio Sandbox by default (production WABA when policy permits). Rich messaging with `whatsapp:` prefix. Enforces Meta's 24-hour customer-service window.
-- **Terminal chat** — REPL with session resume support
-- **Scheduled jobs** — recurring jobs and crons that run Claude and can message you back. Stateful by default (working memory), per-job model routing for cost savings
-- **Persona system** — customizable identity, soul, owner profile, rules, and memory (preloaded every session)
-- **Agents** — domain specialists (marketer, senior-dev) via Claude Agent SDK subagents
-- **Skills** — loads skills from multiple directories, invokable as slash commands
-- **Cross-platform service** — launchd (macOS), systemd (Linux), service-aware restart
-- **MCP tools** — 21 tools for job management, messaging, memory, rules, channel control, and outbound phone calls
-- **Background memory consolidation** — stages memory candidates from conversations automatically
-- **Session summaries** — optional handoff notes between sessions for continuity
-- **Backups** — `clara backup` with auto-backup before updates
-- **Optional integrations** — add Gmail, Discord, and more via skills
+## 🛠 Features Deep Dive
 
-## Commands
+### 📡 Omni-Channel Presence
+- **Slack (Socket Mode)**: Proactive thread awareness, thinking emojis, and file attachment handling.
+- **Telegram (grammY)**: Instant DM access from your phone with live typing indicators.
+- **Phone & Voice (Twilio + OpenAI Realtime)**: Clara can literally call you for a morning standup or evening retro.
+- **Terminal Chat**: Rich REPL interface right in your CLI.
 
-```
-clara init                       — interactive setup (db, channels, persona, agents, active hours)
-clara start / stop               — daemon + OS service (launchd/systemd)
-clara restart                    — restart daemon (service-aware)
-clara status                     — show daemon, jobs, channels, chat rooms
-clara active [--full]            — show active engine count or details
-clara model [name]               — show or set global Claude model
-clara health                     — check daemon, db, channels, config
-clara chat [-c|-r] [--channel ch] — terminal chat (new by default, -c continue, -r pick)
-clara run <prompt>               — one-shot prompt execution
-clara history [room]             — recent messages
-clara logs [-f] [--channel ch]   — daemon logs (follow with -f, filter by channel)
-clara send [-c channel] <msg>    — send a message via channel
-clara version                    — show version
-clara update                     — update to latest version (auto-backup + restart)
+### 👥 The "Employee" System
+Employees are persistent AI co-founders scoped to your projects. They aren't just prompts—they are fully operational entities with their own memory, goals, decisions, and org chart position. They transition between `onboarding`, `active`, and `paused` states.
 
-clara job list                   — list all jobs
-clara job show [name]            — full details + recent runs
-clara job status [name]          — quick status check
-clara job add <n> <s> <p>        — add a job (--type, --always, --agent, --model, --stateless, --prompt-file)
-clara job update <name>          — update a job (--schedule, --prompt, --prompt-file, --type, --always, --agent, --model, --stateless)
-clara job remove <name>          — delete a job
-clara job enable / disable <n>   — toggle a job
-clara job run <name>             — run a job once
-clara job log [name]             — show recent run history
+### 🧠 Two-Stage Memory & Persona
+Clara lives in `~/.heyclara/self/` with five core files: `identity.md`, `owner.md`, `soul.md`, `rules.md`, and `memory.md`. 
+1. **Stage 1 (Consolidation)**: After a chat session goes idle, a background consolidator extracts facts and places them in a `staging.md` file.
+2. **Stage 2 (Promotion)**: A nightly 3 AM cron job promotes reinforced candidates into permanent memory.
 
-clara rules [show|reset]         — view or reset rules.md
-clara memory [show|reset]        — view or reset memory.md
-clara agent list                 — list available agents
-clara agent show <name>          — show agent details and prompt
-clara skills [source]            — list available skills
+### ⏰ Stateful Jobs & Crons
+Crons run 24/7. Jobs respect your defined "active hours". Every scheduled job gets its own sandboxed workspace and isolated working memory. Models can dynamically switch per-job to save API costs (e.g., using `haiku` for simple parsing and `sonnet` for heavy logic).
 
-clara channels                   — show channel status (on/off)
-clara channels on / off          — enable/disable all channels (applied via SIGHUP, no restart)
-clara channels off telegram      — disable one channel without removing its token
-clara watch list                 — list Slack watch channels
-clara watch add/remove/enable/disable — manage watch channels
+---
 
-clara config list                — show all config
-clara config get <key>           — get a config value (dot notation supported)
-clara config set <key> <value>   — set a config value
-clara validate                   — validate config.yaml
-clara backup [list]              — create or list backups
-clara test [-v]                  — run tests
+## 📂 Project Structure
 
-clara db setup                   — install PostgreSQL + create database + migrate
-clara db migrate                 — run database migrations
-clara db status                  — check database connection
+```text
+heyclara/
+├── bin/
+│   └── clara                 # CLI Entry executable
+├── src/
+│   ├── cli/                  # CLI command routing (job, agent, employee, self)
+│   ├── core/                 # Daemon lifecycle, scheduler, memory consolidator
+│   ├── chat/                 # Chat engine, identity injection, terminal REPL
+│   ├── channels/             # Telegram, Slack, SMS, WhatsApp, and Voice implementations
+│   ├── commands/             # Setup wizards, health checks, migrations
+│   ├── db/                   # Lazy postgres connections, models (jobs, messages)
+│   ├── mcp/                  # Tool definitions (21 tools: messaging, rules, agents)
+│   └── prompts/              # System instruction assembly
+├── defaults/                 # Default templates for identity, soul, and slack manifests
+└── skills/                   # 40+ modular skills (e.g., programmatic-seo, pr-reviewer, docs)
 ```
 
-## Architecture
+---
 
-All config and data lives in `~/.heyclara/`:
+## 💻 CLI Command Reference
 
+HeyClara comes with a powerful CLI to manage the daemon, chat sessions, jobs, and config.
+
+```bash
+# Core
+clara init                       # Interactive setup wizard
+clara start / stop / restart     # Daemon lifecycle
+clara status                     # Show daemon, jobs, channels, chat rooms
+clara chat                       # Launch terminal REPL chat
+clara run <prompt>               # One-shot execution
+
+# Jobs
+clara job list                   # List all background jobs
+clara job add <name> <schedule> <prompt> # Add a new job
+clara job remove <name>          # Delete a job
+clara job run <name>             # Force trigger a job
+
+# Employees & Persona
+clara employee add               # Create a new AI co-founder
+clara rules [show|reset]         # Manage behavioral instructions
+clara memory [show|reset]        # Manage persistent context
+
+# Config
+clara config list                # View global config
+clara config set <key> <value>   # Update config (e.g., channels.slack.enabled true)
 ```
-~/.heyclara/
-  config.yaml       — database, channels, model, timezone, active hours, API keys
-  self/
-    identity.md     — agent personality and voice
-    owner.md        — who runs this agent
-    soul.md         — how the agent works
-    rules.md        — behavioral instructions (loaded every session)
-    memory.md       — persistent facts and context (loaded every session)
-  jobs/               — per-job prompt.md, working memory, and state (auto-created)
-  optimizations/      — optimization loop run workspaces
-  images/
-    reference.webp  — visual identity reference image
-    profile.webp    — profile picture for Telegram/Slack
-  tmp/
-    clara.pid, daemon.log, cron-state.json, cron-audit.jsonl
-```
 
-Post-session background LLM work can be disabled in `config.yaml`:
+---
 
-```yaml
-session_finalization:
-  enabled: true
-  memory_consolidation: true
-  summaries: true
-```
-
-Use `clara config set session_finalization.memory_consolidation false` to stop memory staging, `clara config set session_finalization.summaries false` to stop session summaries, or `clara config set session_finalization.enabled false` to disable both.
-
-## Contributing
+## 🤝 Contributing
 
 **Don't add features. Add skills.**
 
-If you want to add Discord support, don't create a PR that adds Discord alongside Telegram. Instead, contribute a skill folder (`skills/add-discord/SKILL.md`) that teaches Claude Code how to transform a clara installation to use Discord.
+If you want to add Discord support, don't create a PR that bloats the core engine. Instead, contribute a skill folder (`skills/add-discord/SKILL.md`) that teaches Clara how to modify her own codebase to use Discord. You end up with a clean core engine that dynamically morphs to fit your needs.
 
-Users then run `/add-discord` on their fork and get clean code that does exactly what they need, not a bloated system trying to support every use case.
+## 📝 License
 
-## Requirements
-
-- [Bun](https://bun.sh) runtime (auto-installed if missing)
-- PostgreSQL (`clara db setup` handles installation)
-- Claude API access (via `@anthropic-ai/claude-agent-sdk`)
-- Gemini API key (optional, for image generation — `clara config set gemini_api_key ...`)
-- OpenAI API key (optional, for image generation — `clara config set openai_api_key ...`)
-
-## Updating
-
-```bash
-clara update               # auto-backup, install latest, restart daemon
-```
-
-## Author
-
-Aman ([amankumar.ai](https://amankumar.ai))
+Released under the [MIT License](LICENSE). 
+Created by Aman ([amankumar.ai](https://amankumar.ai)) • Maintained and Migrated by Dev Chiniwala.
