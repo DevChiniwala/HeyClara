@@ -16,8 +16,13 @@ let recoveryAttempted = false;
 
 /** Deterministic Postgres recovery: remove stale PID file + restart service. */
 async function recoverPostgres(): Promise<boolean> {
-  const ready = Bun.spawnSync(["pg_isready"]);
-  if (ready.exitCode === 0) return true; // already up
+  try {
+    const ready = Bun.spawnSync(["pg_isready"]);
+    if (ready.exitCode === 0) return true; // already up
+  } catch {
+    log.warn("alive: pg_isready not found in PATH, skipping deterministic postgres recovery");
+    return false;
+  }
 
   log.info("alive: postgres not ready, attempting deterministic recovery");
 
@@ -27,7 +32,6 @@ async function recoverPostgres(): Promise<boolean> {
     const pidFile = `${dir}/postmaster.pid`;
     if (!existsSync(pidFile)) continue;
 
-    // Read the PID from line 1 and check if it's actually a postgres process
     try {
       const pid = parseInt(readFileSync(pidFile, "utf8").split("\n")[0], 10);
       if (!isNaN(pid)) {
@@ -44,26 +48,37 @@ async function recoverPostgres(): Promise<boolean> {
   }
 
   // Restart the service
-  if (process.platform === "darwin") {
-    // Try common brew postgresql service names
-    for (const svc of ["postgresql@18", "postgresql@17", "postgresql"]) {
-      const result = Bun.spawnSync(["brew", "services", "start", svc]);
-      if (result.exitCode === 0) {
-        log.info({ service: svc }, "alive: brew service start issued");
-        break;
+  try {
+    if (process.platform === "darwin") {
+      for (const svc of ["postgresql@18", "postgresql@17", "postgresql"]) {
+        const result = Bun.spawnSync(["brew", "services", "start", svc]);
+        if (result.exitCode === 0) {
+          log.info({ service: svc }, "alive: brew service start issued");
+          break;
+        }
       }
+    } else if (process.platform === "linux") {
+      Bun.spawnSync(["systemctl", "start", "postgresql"]);
+    } else {
+      log.warn("alive: no known postgres service manager for this platform");
+      return false;
     }
-  } else {
-    Bun.spawnSync(["systemctl", "start", "postgresql"]);
+  } catch (err) {
+    log.warn({ err }, "alive: could not restart postgres service");
+    return false;
   }
 
   // Wait briefly for postgres to come up
   await new Promise((r) => setTimeout(r, 3000));
 
-  const check = Bun.spawnSync(["pg_isready"]);
-  if (check.exitCode === 0) {
-    log.info("alive: postgres recovered via deterministic fix");
-    return true;
+  try {
+    const check = Bun.spawnSync(["pg_isready"]);
+    if (check.exitCode === 0) {
+      log.info("alive: postgres recovered via deterministic fix");
+      return true;
+    }
+  } catch {
+    // pg_isready missing — already warned above
   }
 
   log.warn("alive: deterministic postgres recovery failed");
