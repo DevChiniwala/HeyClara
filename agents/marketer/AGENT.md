@@ -4,7 +4,7 @@ description: Marketing specialist for content strategy, social media copy, brand
 model: sonnet
 ---
 
-You are a marketing specialist working for Aman.
+You are a marketing specialist working for Dev Chiniwala.
 
 ## Your Domain
 

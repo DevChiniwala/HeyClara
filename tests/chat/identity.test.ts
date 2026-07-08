@@ -47,20 +47,20 @@ describe("loadIdentity", () => {
 
   test("loads identity, owner, soul, rules, and memory files in order", () => {
     writeFileSync(`${TEST_DIR}/self/identity.md`, "I am clara");
-    writeFileSync(`${TEST_DIR}/self/owner.md`, "Owner: Aman");
+    writeFileSync(`${TEST_DIR}/self/owner.md`, "Owner: Dev Chiniwala");
     writeFileSync(`${TEST_DIR}/self/soul.md`, "Be helpful");
     writeFileSync(`${TEST_DIR}/self/rules.md`, "Keep stamp short");
     writeFileSync(`${TEST_DIR}/self/memory.md`, "Learned: X");
 
     const result = loadIdentity();
     expect(result).toContain("I am clara");
-    expect(result).toContain("Owner: Aman");
+    expect(result).toContain("Owner: Dev Chiniwala");
     expect(result).toContain("Be helpful");
     expect(result).toContain("Keep stamp short");
     expect(result).toContain("Learned: X");
     // Verify order: identity → owner → soul → rules → memory
-    expect(result.indexOf("I am clara")).toBeLessThan(result.indexOf("Owner: Aman"));
-    expect(result.indexOf("Owner: Aman")).toBeLessThan(result.indexOf("Be helpful"));
+    expect(result.indexOf("I am clara")).toBeLessThan(result.indexOf("Owner: Dev Chiniwala"));
+    expect(result.indexOf("Owner: Dev Chiniwala")).toBeLessThan(result.indexOf("Be helpful"));
     expect(result.indexOf("Be helpful")).toBeLessThan(result.indexOf("Keep stamp short"));
     expect(result.indexOf("Keep stamp short")).toBeLessThan(result.indexOf("Learned: X"));
   });

@@ -10,7 +10,7 @@
 - **AI:** `@anthropic-ai/claude-agent-sdk` (chat and jobs); optional Codex CLI runner
 - **Database:** PostgreSQL (via `postgres` driver)
 - **Image generation:** OpenAI + Gemini API (optional)
-- **Author:** Aman (amankumar.ai)
+- **Author:** Dev Chiniwala (devchiniwala.com)
 
 ## Directory Structure
 

@@ -11,7 +11,7 @@ Add Twilio SMS (inbound/outbound on existing `+1 302 548 0697`) and Twilio Whats
 - **Cellular only (no data)** → SMS
 - **Voice on cellular** → Phone (Twilio + OpenAI Realtime)
 
-Primary motivating use case: Aman's upcoming Ladakh trip, where SMS works in patchy cell zones that don't carry data.
+Primary motivating use case: Dev Chiniwala's upcoming Ladakh trip, where SMS works in patchy cell zones that don't carry data.
 
 ## Non-goals
 
@@ -24,7 +24,7 @@ Primary motivating use case: Aman's upcoming Ladakh trip, where SMS works in pat
 
 ### Shared Twilio webhook server
 
-The phone channel currently runs its own Bun HTTP+WS server on `PHONE_PORT` (default 7079), exposed via cloudflared at `https://clara.amankumar.ai`. Adding SMS + WhatsApp without consolidation would mean 3 ports, 3 tunnel routes, 3 webhook bases — operationally wrong for a single-user daemon.
+The phone channel currently runs its own Bun HTTP+WS server on `PHONE_PORT` (default 7079), exposed via cloudflared at `https://clara.devchiniwala.com`. Adding SMS + WhatsApp without consolidation would mean 3 ports, 3 tunnel routes, 3 webhook bases — operationally wrong for a single-user daemon.
 
 **Decision:** extract a shared `TwilioWebhookServer` at `src/channels/twilio/server.ts`. Owns the Bun HTTP+WS bootstrap. Channels register routes via:
 
@@ -55,7 +55,7 @@ channels:
     api_key_secret: ... # optional
     owner_number: "+91..." # highest-trust caller
     allowlist: []
-    public_base_url: https://clara.amankumar.ai
+    public_base_url: https://clara.devchiniwala.com
     port: 7079
   phone: # voice-only fields
     enabled: true
@@ -111,8 +111,8 @@ No new MCP tools. Existing `send_message` already takes a `channel` arg — exte
 ## Deployment
 
 - Twilio Console (or via REST API since Bella has access):
-  - SMS: set `SmsUrl` on `+1 302 548 0697` to `https://clara.amankumar.ai/twilio/sms/incoming` (POST).
-  - WhatsApp Sandbox: in Console → Messaging → Try it out → WhatsApp → set inbound webhook to `https://clara.amankumar.ai/twilio/whatsapp/incoming` (POST). Aman opts in by sending `join <code>` to `+1 415 523 8886` from his WhatsApp.
+  - SMS: set `SmsUrl` on `+1 302 548 0697` to `https://clara.devchiniwala.com/twilio/sms/incoming` (POST).
+  - WhatsApp Sandbox: in Console → Messaging → Try it out → WhatsApp → set inbound webhook to `https://clara.devchiniwala.com/twilio/whatsapp/incoming` (POST). Dev Chiniwala opts in by sending `join <code>` to `+1 415 523 8886` from his WhatsApp.
 
 ## Implementation order
 
@@ -130,7 +130,7 @@ No new MCP tools. Existing `send_message` already takes a `channel` arg — exte
 
 ## Risks + open empirical questions
 
-- **US-Twilio-long-code → India SMS deliverability:** unclear. General-purpose subagent says 40–70% delivery with US-side A2P 10DLC throttling; Codex says Indian users can't reply at all to a US Twilio number. These contradict. Plan: ship and test empirically — if Aman texts `+1 302 548 0697` from his Indian SIM and Twilio's inbound log shows the message, we have ground truth on the inbound leg. Outbound leg can be measured by checking Twilio's delivery callbacks.
+- **US-Twilio-long-code → India SMS deliverability:** unclear. General-purpose subagent says 40–70% delivery with US-side A2P 10DLC throttling; Codex says Indian users can't reply at all to a US Twilio number. These contradict. Plan: ship and test empirically — if Dev Chiniwala texts `+1 302 548 0697` from his Indian SIM and Twilio's inbound log shows the message, we have ground truth on the inbound leg. Outbound leg can be measured by checking Twilio's delivery callbacks.
 - **WhatsApp Sandbox shared-number opt-ins**: allowlist enforcement is the only thing standing between us and stranger spam. Enforce hard from day 1 + per-number rate limit.
 - **Phone channel refactor regression**: the server extraction touches code that's currently working in production on the Mac Mini. Test thoroughly before deploying.
 - **Config migration on Mac Mini**: backward-compat keeps existing yaml working, but the operator should still migrate to the new shape. Log a deprecation hint.

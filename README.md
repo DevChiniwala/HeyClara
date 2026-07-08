@@ -221,4 +221,4 @@ If you want to add Discord support, don't create a PR that bloats the core engin
 ## 📝 License
 
 Released under the [MIT License](LICENSE). 
-Created by Aman ([amankumar.ai](https://amankumar.ai)) • Maintained and Migrated by Dev Chiniwala.
+Created by Dev Chiniwala ([devchiniwala.com](https://devchiniwala.com)) • Maintained and Migrated by Dev Chiniwala.

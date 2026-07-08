@@ -336,7 +336,7 @@ class PhoneChannel implements Channel {
   }
 
   private classifyCaller(from: string): { label: string; allowed: boolean } {
-    if (from && from === this.twilio.owner_number) return { label: "Aman", allowed: true };
+    if (from && from === this.twilio.owner_number) return { label: "Dev Chiniwala", allowed: true };
     if (from && this.twilio.allowlist.includes(from)) return { label: from, allowed: true };
     return { label: from || "unknown", allowed: false };
   }

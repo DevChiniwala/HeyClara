@@ -36,7 +36,7 @@ aws s3 ls --profile PowerUserAccess-592636539130
 
 - **Account ID**: 592636539130
 - **Region**: us-east-1
-- **IAM User**: aman
+- **IAM User**: devchiniwala
 
 ## Common services and commands
 
@@ -147,7 +147,7 @@ aws sts get-session-token --duration-seconds 3600
 aws iam list-users
 
 # List access keys for user
-aws iam list-access-keys --user-name aman
+aws iam list-access-keys --user-name devchiniwala
 
 # Check key last used
 aws iam get-access-key-last-used --access-key-id AKIAXXXXXXXX

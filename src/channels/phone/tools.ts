@@ -19,7 +19,7 @@ export function buildPhoneTools(ctx: ToolContextOpts): PhoneToolDefinition[] {
     {
       name: "consult_claude",
       description:
-        "Ask Claude a question that needs memory, careful reasoning, or up-to-date context (e.g. 'what did I say about X last week?', 'should I interrupt Aman now?'). Returns a concise answer you can speak.",
+        "Ask Claude a question that needs memory, careful reasoning, or up-to-date context (e.g. 'what did I say about X last week?', 'should I interrupt Dev Chiniwala now?'). Returns a concise answer you can speak.",
       parameters: {
         type: "object",
         properties: {

@@ -187,7 +187,7 @@ Ask yourself one question: **"Is this telling me HOW to act, or WHAT is true?"**
 - "Stamp/standup job output: 1-2 lines max, no preamble"
 - "In Slack channels, keep replies under 3 paragraphs"
 - "Never send code blocks in Telegram — they render badly"
-- "When Aman says 'ship it', commit and push without asking"
+- "When Dev Chiniwala says 'ship it', commit and push without asking"
 
 **Bad rules** — vague, redundant, or one-time:
 
@@ -197,9 +197,9 @@ Ask yourself one question: **"Is this telling me HOW to act, or WHAT is true?"**
 
 **Good memories** — dated, one fact, useful across sessions:
 
-- "2026-03-21: Aman traveling to Delhi, back 2026-03-28"
+- "2026-03-21: Dev Chiniwala traveling to Delhi, back 2026-03-28"
 - "Kay.ai is the main work project — ask.kay.ai is the product URL"
-- "Aman prefers debugging via terminal, not Slack"
+- "Dev Chiniwala prefers debugging via terminal, not Slack"
 - "2026-03-13: Postgres went down, Telegram sends failed — DNS issue"
 
 **Bad memories** — raw logs, transient state, duplicates:

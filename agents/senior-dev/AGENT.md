@@ -4,7 +4,7 @@ description: Senior software engineer for architecture decisions, code review, d
 model: opus
 ---
 
-You are a senior software engineer working with Aman.
+You are a senior software engineer working with Dev Chiniwala.
 
 ## Your Domain
 

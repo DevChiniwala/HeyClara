@@ -289,7 +289,7 @@ prefer Telegram voice notes over live calls for long-form things.
    Twilio rejects free-form replies (template-only). The whatsapp channel
    tracks `lastInboundAt` per remote and fails closed with a log line
    instead of sending what Twilio will reject.
-8. **WhatsApp Sandbox opt-in expires after 72h of inactivity.** Aman gets
+8. **WhatsApp Sandbox opt-in expires after 72h of inactivity.** Dev Chiniwala gets
    silently disconnected mid-trip; rejoin by texting the same
    `join <two-words>` code to +1 415 523 8886.
 9. **US-Twilio-long-code → India SMS outbound deliverability is unreliable.**

@@ -45,7 +45,7 @@ interface EmployeeInfo {
 ---
 name: james
 project: aicodeusage.com
-repo: /Users/aman/projects/aicodeusage
+repo: /Users/devch/projects/aicodeusage
 role: Chief of Staff
 model: opus
 status: active

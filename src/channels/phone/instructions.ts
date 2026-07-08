@@ -26,7 +26,7 @@ export function buildInboundInstructions(callerLabel: string): string {
 export function buildOutboundInstructions(goal: string, context?: string): string {
   const identity = loadIdentity();
   const callBlock = [
-    "You are placing a phone call on behalf of Aman.",
+    "You are placing a phone call on behalf of Dev Chiniwala.",
     VOICE_RULES,
     `Goal: ${goal}`,
     context ? `Context:\n${context}` : "",

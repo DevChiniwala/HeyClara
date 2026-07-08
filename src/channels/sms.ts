@@ -6,13 +6,13 @@
  * chat engine → REST reply. Reuses the shared TwilioWebhookServer for
  * routing, signature validation, dedup, and rate-limiting.
  *
- * Use case: cellular-only-no-data reachability — Aman can text Clara from
+ * Use case: cellular-only-no-data reachability — Dev Chiniwala can text Clara from
  * patchy zones (Ladakh highways, basements, etc.) where Telegram /
  * WhatsApp / voice over data won't work but SMS over SS7 still does.
  *
  * Note: outbound from US Twilio long codes to Indian mobile numbers has
  * variable deliverability under TRAI scrubbing rules. Test empirically;
- * if outbound fails, the inbound leg (Aman → Clara) is more reliable.
+ * if outbound fails, the inbound leg (Dev Chiniwala → Clara) is more reliable.
  */
 import { getMcpServers } from "../mcp";
 import { runMigrations } from "../db/migrate";
