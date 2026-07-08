@@ -61,10 +61,19 @@ export function isRunning(): boolean {
   if (entry === null) return false;
 
   const currentLstart = getLstart(entry.pid);
+  
   if (!currentLstart) {
-    log.warn({ stalePid: entry.pid }, "removing stale pid file (process not running)");
-    removePid();
-    return false;
+    // If getLstart failed (e.g. Windows where 'ps' doesn't exist), fallback to process.kill(pid, 0)
+    try {
+      process.kill(entry.pid, 0);
+      // Process exists, but we can't verify identity via lstart. Assume it's ours.
+      return true;
+    } catch {
+      // Process genuinely doesn't exist
+      log.warn({ stalePid: entry.pid }, "removing stale pid file (process not running)");
+      removePid();
+      return false;
+    }
   }
   if (entry.lstart && currentLstart !== entry.lstart) {
     log.warn(
