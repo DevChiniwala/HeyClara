@@ -18,8 +18,9 @@ const TEST_DB_NAME = "heyclara_test";
 
 /**
  * Derive admin and test DB URLs.
- * If DATABASE_URL is provided (CI), rewrite its path to /postgres (admin) and
- * /heyclara_test (test), preserving user/password/host.
+ * If DATABASE_URL is provided (CI), use it as-is for admin (CREATE DATABASE
+ * is a server-level op, works from any DB the user can connect to) and
+ * rewrite its path to /heyclara_test for the test DB.
  */
 function deriveUrls(): { adminUrl: string; testDbUrl: string } {
   if (process.env.CLARA_TEST_ADMIN_URL && process.env.CLARA_TEST_DATABASE_URL) {
@@ -33,7 +34,7 @@ function deriveUrls(): { adminUrl: string; testDbUrl: string } {
   if (baseUrl) {
     try {
       const parsed = new URL(baseUrl);
-      parsed.pathname = "/postgres";
+      // Use the original DB for admin — don't rewrite to /postgres which may not exist
       const adminUrl = process.env.CLARA_TEST_ADMIN_URL || parsed.toString();
       parsed.pathname = `/${TEST_DB_NAME}`;
       const testDbUrl = process.env.CLARA_TEST_DATABASE_URL || parsed.toString();
@@ -49,7 +50,13 @@ function deriveUrls(): { adminUrl: string; testDbUrl: string } {
   };
 }
 
+let _originalDatabaseUrl: string | undefined;
+
 export async function setupTestDb(): Promise<void> {
+  // Save original DATABASE_URL so teardown can restore it (important when
+  // bun runs multiple test files concurrently in the same process)
+  _originalDatabaseUrl = process.env.DATABASE_URL;
+
   let { adminUrl, testDbUrl } = deriveUrls();
 
   // Auto-create test database if it doesn't exist
@@ -99,7 +106,14 @@ export async function setupTestDb(): Promise<void> {
 export async function teardownTestDb(): Promise<void> {
   await closeDb();
   delete process.env.CLARA_HOME;
-  delete process.env.DATABASE_URL;
+  // Restore DATABASE_URL to its original value instead of deleting it,
+  // so concurrent test files in the same process still see it
+  if (_originalDatabaseUrl !== undefined) {
+    process.env.DATABASE_URL = _originalDatabaseUrl;
+  } else {
+    delete process.env.DATABASE_URL;
+  }
   resetConfig();
   rmSync(TEST_HOME, { recursive: true, force: true });
 }
+
