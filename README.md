@@ -1,6 +1,6 @@
 <div align="center">
 
-  <img src="https://raw.githubusercontent.com/DevChiniwala/HeyClara/main/skills/clara-image/assets/clara-profile.webp" width="160" height="160" alt="HeyClara" style="border-radius: 50%;" />
+  <img src="skills/clara-image/assets/logo.png" width="160" height="160" alt="HeyClara" style="border-radius: 50%;" />
 
   <h1>HeyClara</h1>
   <p><strong>Your personal AI daemon — fork it, mold it, make it yours.</strong></p>
